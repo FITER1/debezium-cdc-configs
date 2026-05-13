@@ -11,7 +11,8 @@
     "report:100k-defaults": "node scripts/generate-100k-performance-report.js",
     "report:1m": "node scripts/generate-cdc-pipeline-report.js",
     "report:final": "node scripts/generate-final-report.js",
-    "report:k6-api": "node scripts/generate-k6-api-report.js"
+    "report:k6-api": "node scripts/generate-k6-api-report.js",
+    "report:100k": "node scripts/generate-100k-report.js"
   },
   "keywords": [],
   "author": "",

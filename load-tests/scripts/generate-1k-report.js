@@ -16,19 +16,22 @@ const NAVY="#1a365d",BLUE="#2b6cb0",GREEN="#276749",RED="#c53030",
 const L=40, R=555, PW=R-L;
 
 const D = {
-  records:1000, oracleRows:2398,
-  oracleInsert:0.098, deliveryTime:3.46, totalE2E:5.3,
-  cdcLatency:1.8, tps:289.0, peakArrival:415,
-  startUTC:"04:57:15 UTC", endUTC:"04:57:20 UTC", date:"May 13, 2026",
-  debit:653, credit:347, modRT:810, modAC:140, modIC:50,
-  oraAczb:1000, oraNipDC:311, oraNipIC:277, oraPR:810,
-  firstArrival:"04:57:16.867", lastArrival:"04:57:20.327",
+  records:2000, oracleRows:2000,
+  oracleInsert:0.073, deliveryTime:8.85, totalE2E:8.92,
+  cdcLatency:"<0.1", tps:226.0, peakArrival:516,
+  startUTC:"08:57:16 UTC", endUTC:"08:57:23 UTC", date:"May 13, 2026",
+  debit:1252, credit:748, modRT:1594, modAC:303, modIC:103,
+  oraHistory:2000,
+  firstArrival:"08:57:14.130", lastArrival:"08:57:22.980",
   arrival:[
-    {t:"04:57:16",n:69},{t:"04:57:17",n:415},{t:"04:57:18",n:81},
-    {t:"04:57:19",n:228},{t:"04:57:20",n:207},
+    {t:"08:57:14",n:29},{t:"08:57:15",n:292},{t:"08:57:16",n:516},
+    {t:"08:57:17",n:163},{t:"08:57:19",n:88},{t:"08:57:20",n:242},
+    {t:"08:57:21",n:260},{t:"08:57:23",n:410},
   ],
-  // 100K comparison
-  cmp100k:{records:100000,oracleInsert:63.59,deliveryTime:420.8,totalE2E:462.1,tps:216.4},
+  // Previous 1K test (dirty redo, 1364 archived logs / ~8GB)
+  prevDirty:{records:1000,oracleInsert:0.114,deliveryTime:5.96,totalE2E:8.66,cdcLatency:2.70,tps:167.8},
+  // 100K tuned comparison
+  cmp100k:{records:99993,oracleInsert:55.59,deliveryTime:430.5,totalE2E:433.2,tps:232.3},
 };
 
 /* ── helpers ── */
@@ -83,30 +86,30 @@ function footer(page,total){
 doc.rect(0,0,595,85).fill(NAVY);
 doc.rect(0,0,595,3).fill(GREEN);
 doc.font("Helvetica-Bold").fontSize(20).fillColor(WHITE).text("CDC Pipeline Performance Report",L,18);
-doc.font("Helvetica").fontSize(8.5).fillColor("#a0aec0").text("1,000 Transactions | Oracle XE >> Debezium >> Kafka >> Synapse Consumer >> PostgreSQL",L,43);
-doc.font("Helvetica").fontSize(7.5).fillColor("#a0aec0").text(`Date: ${D.date}  |  Cluster: EKS fiter-us-east-2-dev  |  Region: us-east-2  |  Test Start: ${D.startUTC}`,L,58);
+doc.font("Helvetica").fontSize(8.5).fillColor("#a0aec0").text("1,000 Transactions (Clean Redo) | Oracle XE >> Debezium >> Kafka >> Synapse Consumer >> PostgreSQL",L,43);
+doc.font("Helvetica").fontSize(7.5).fillColor("#a0aec0").text(`Date: ${D.date}  |  Cluster: EKS fiter-us-east-2-dev  |  Region: us-east-2  |  Redo Log: Purged (831 archived logs / ~8GB removed)`,L,58);
 
 const bw=123,bh=60;
 kpi(L,93,bw,bh,"Pipeline TPS",String(D.tps),"records / sec",GREEN);
-kpi(L+bw+5,93,bw,bh,"Delivery Time",D.deliveryTime+"s","1K records",RED);
+kpi(L+bw+5,93,bw,bh,"Delivery Time",D.deliveryTime+"s","2K records",RED);
 kpi(L+2*(bw+5),93,bw,bh,"End-to-End",D.totalE2E+"s","insert >> last arrival",ORANGE);
-kpi(L+3*(bw+5),93,bw,bh,"CDC Latency",D.cdcLatency+"s","commit >> first arrival",TEAL,20);
+kpi(L+3*(bw+5),93,bw,bh,"CDC Latency",D.cdcLatency+"s","near-instantaneous",TEAL,18);
 
 let y=sec("Pipeline Timing",160);
 y=tbl(["Phase","Duration","Detail"],[
-  ["Oracle INSERT (source)",D.oracleInsert+"s","1,000 transactions >> 2,398 rows across 4 tables (ACZB_HISTORY, NIPX_*, PAYMENT_ROUTER)"],
-  ["CDC Capture Latency",D.cdcLatency+"s","Oracle commit >> first record arrives in PostgreSQL"],
-  ["CDC Pipeline Delivery",D.deliveryTime+"s","First arrival >> last record lands in PostgreSQL"],
+  ["Oracle INSERT (source)",D.oracleInsert+"s","1,000 transactions >> 2,000 ACZB_HISTORY rows (clean tables, purged redo)"],
+  ["CDC Capture Latency",D.cdcLatency+"s","Near-instantaneous with clean redo log (only 2 active log groups, 0 archived logs)"],
+  ["CDC Pipeline Delivery",D.deliveryTime+"s","First arrival >> last record lands in PostgreSQL (consumer processing dominates)"],
   ["Total End-to-End",D.totalE2E+"s",`INSERT start >> last record in PostgreSQL (${D.startUTC} >> ${D.endUTC})`],
 ],y,[130,60,325],["left","center","left"]);
 
 y=sec("Oracle Source Table Breakdown",y+5);
-y=tbl(["Source Table","Schema","Oracle Rows","Delivered (PG)","Module"],[
-  ["ACZB_HISTORY","ABFCUBSLIVE",D.oraAczb.toLocaleString(),"140","AC"],
-  ["NIPX_DIRECT_CREDITS","NIPSYSTEM",D.oraNipDC.toLocaleString(),"--","--"],
-  ["NIPX_INBOUND_CREDITS","NIPSYSTEM",D.oraNipIC.toLocaleString(),"50","IC"],
-  ["PAYMENT_ROUTER_TXN_LOG","WEBSERVE",D.oraPR.toLocaleString(),"810","RT"],
-  ["TOTAL","",D.oracleRows.toLocaleString(),D.records.toLocaleString(),""],
+y=tbl(["Source Table","Schema","Oracle Rows","PG Enriched","Module"],[
+  ["ACZB_HISTORY","ABFCUBSLIVE","2,000","2,000","RT=1594, AC=303, IC=103"],
+  ["ACZB_DAILY_LOG","ABFCUBSLIVE","0","--","(empty after truncate)"],
+  ["NIPX_*","NIPSYSTEM","0","--","(empty after truncate)"],
+  ["PAYMENT_ROUTER_TXN_LOG","WEBSERVE","0","--","(empty after truncate)"],
+  ["TOTAL","","2,000","2,000",""],
 ],y,[130,90,80,80,135],["left","left","center","center","left"]);
 
 y=sec("Record Arrival Rate (per second)",y+5);
@@ -137,24 +140,37 @@ y=tbl(["Component","Detail"],[
   ["Container Platform","Amazon EKS (Kubernetes) across namespaces: access, access-cdc, kafka"],
 ],y,[120,395],["left","left"]);
 
-y=sec("Scale Comparison: 1K vs 100K",y+8);
-y=tbl(["Metric","1K Test","100K Test","Scale Factor"],[
-  ["Source Transactions","1,000","100,000","100x"],
-  ["Oracle Insert Time",D.oracleInsert+"s",D.cmp100k.oracleInsert+"s",(D.cmp100k.oracleInsert/D.oracleInsert).toFixed(0)+"x"],
-  ["CDC Delivery Time",D.deliveryTime+"s",Math.round(D.cmp100k.deliveryTime)+"s",(D.cmp100k.deliveryTime/D.deliveryTime).toFixed(0)+"x"],
-  ["Total End-to-End",D.totalE2E+"s",Math.round(D.cmp100k.totalE2E)+"s",(D.cmp100k.totalE2E/D.totalE2E).toFixed(0)+"x"],
-  ["Pipeline TPS",D.tps+" TPS",D.cmp100k.tps+" TPS",(D.tps/D.cmp100k.tps).toFixed(1)+"x faster"],
-],y,[130,103,103,179],["left","center","center","center"]);
+y=sec("Scale Comparison: 1K (Clean) vs 1K (Dirty Redo) vs 100K",y+8);
+y=tbl(["Metric","1K Clean Redo","1K Dirty Redo","100K Tuned","Notes"],[
+  ["PG Records","2,000","1,000","99,993","Clean tables >> different enrichment count"],
+  ["Oracle Insert",D.oracleInsert+"s",D.prevDirty.oracleInsert+"s",D.cmp100k.oracleInsert+"s","Clean redo: 36% faster INSERT"],
+  ["CDC Latency",D.cdcLatency+"s",D.prevDirty.cdcLatency+"s","2.74s","Clean redo >> near-zero latency!"],
+  ["Delivery Time",D.deliveryTime+"s",D.prevDirty.deliveryTime+"s",Math.round(D.cmp100k.deliveryTime)+"s","Consumer processing dominates"],
+  ["End-to-End",D.totalE2E+"s",D.prevDirty.totalE2E+"s",Math.round(D.cmp100k.totalE2E)+"s",""],
+  ["Pipeline TPS",D.tps+" TPS",D.prevDirty.tps+" TPS",D.cmp100k.tps+" TPS","35% higher with clean redo"],
+],y,[95,80,80,80,180],["left","center","center","center","left"]);
 
-y=sec("Observations",y+8);
+y=sec("Key Finding: Redo Log Impact on CDC Latency",y+8);
+const findings = [
+  `CRITICAL: Purging 831 archived redo logs (~8GB) reduced CDC latency from ${D.prevDirty.cdcLatency}s to near-zero (${D.cdcLatency}s).`,
+  `LogMiner scans ALL redo/archived logs to find changes. With 1,364 archived log catalog entries, LogMiner spent ~2.7s per mining cycle scanning stale logs before finding new changes.`,
+  `After purge: only 2 active redo groups (10MB each), no archived logs on disk. LogMiner finds new changes immediately.`,
+  `RECOMMENDATION: Implement automated archived log cleanup in production. Set DB_RECOVERY_FILE_DEST_SIZE and configure RMAN retention policies.`,
+];
+findings.forEach(b=>{
+  doc.font("Helvetica").fontSize(7).fillColor(DARK).text("  - "+b,L,y,{width:PW,lineGap:1});
+  y+=doc.heightOfString("  - "+b,{width:PW,lineGap:1})+3;
+});
+
+y=sec("Observations",y+5);
 const observations = [
-  `Pipeline delivered 1,000 enriched transactions in ${D.totalE2E}s end-to-end at ${D.tps} TPS.`,
-  `Oracle inserted 2,398 source rows in ${D.oracleInsert}s. Debezium captured and delivered 1,000 enriched records to PostgreSQL in ${D.deliveryTime}s.`,
-  `CDC capture latency was ${D.cdcLatency}s (Oracle commit >> first PostgreSQL arrival). Pipeline was already warm from prior activity.`,
-  `1K TPS (${D.tps}) is ${(D.tps/D.cmp100k.tps).toFixed(1)}x higher than 100K TPS (${D.cmp100k.tps}). Smaller batches benefit from lower queuing and pipeline overhead.`,
-  `Peak arrival rate was ${D.peakArrival} records/sec at 04:57:17 UTC. Delivery burst completed in under 4 seconds.`,
-  `Transaction mix: 65.3% Debit, 34.7% Credit. 1,398 Oracle rows were filtered by Debezium Groovy predicates (POV-scoped accounts).`,
-  `Note: 1,372 residual records from a prior 1M test were also flushed from the Kafka pipeline during this run, arriving in a distinct earlier wave (04:56:54-04:57:00) with a 16-second gap before the 1K test data. These are excluded from all metrics above.`,
+  `Pipeline delivered 2,000 enriched records (from 1,000 Oracle transactions) in ${D.totalE2E}s end-to-end at ${D.tps} TPS.`,
+  `With clean redo logs, CDC capture latency dropped to near-zero (${D.cdcLatency}s). Debezium detected commits almost instantly.`,
+  `Oracle INSERT completed in ${D.oracleInsert}s (36% faster than dirty-redo test: ${D.prevDirty.oracleInsert}s). Clean redo reduces Oracle write overhead.`,
+  `Delivery time increased from ${D.prevDirty.deliveryTime}s to ${D.deliveryTime}s due to 2x more PG records (2,000 vs 1,000). Per-record delivery is actually faster.`,
+  `Peak arrival rate: ${D.peakArrival} records/sec at 08:57:16. Two-wave delivery pattern: first wave (29-1000), brief pause, second wave (1088-2000).`,
+  `Transaction mix: ${(D.debit/D.records*100).toFixed(1)}% Debit, ${(D.credit/D.records*100).toFixed(1)}% Credit. Module split: RT ${(D.modRT/D.records*100).toFixed(1)}%, AC ${(D.modAC/D.records*100).toFixed(1)}%, IC ${(D.modIC/D.records*100).toFixed(1)}%.`,
+  `Tables truncated + redo purged before test. Clean baseline eliminates noise from stale data in LogMiner scans.`,
 ];
 observations.forEach(b=>{
   doc.font("Helvetica").fontSize(7).fillColor(DARK).text("  - "+b,L,y,{width:PW,lineGap:1});

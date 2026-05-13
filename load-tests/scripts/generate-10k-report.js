@@ -16,30 +16,30 @@ const NAVY="#1a365d",BLUE="#2b6cb0",GREEN="#276749",RED="#c53030",
 const L=40, R=555, PW=R-L;
 
 const D = {
-  records:10000, oracleRows:23899,
-  oracleInsert:4.44, deliveryTime:43.45, totalE2E:47.9,
-  cdcLatency:4.41, tps:230.2,
-  startUTC:"05:58:27 UTC", endUTC:"05:59:14 UTC", date:"May 13, 2026",
-  insertStart:"05:58:27.085", insertEnd:"05:58:31.521",
-  firstArrival:"05:58:31.495", lastArrival:"05:59:14.940",
-  debit:6219, credit:3781, modRT:7960, modAC:1526, modIC:514,
-  oraAczb:10000, oraNipDC:2943, oraNipIC:2996, oraPR:7960,
+  records:10000, oracleRows:26695,
+  oracleInsert:2.63, deliveryTime:39.26, totalE2E:41.03,
+  cdcLatency:1.77, tps:254.7,
+  startUTC:"08:35:17 UTC", endUTC:"08:35:58 UTC", date:"May 13, 2026",
+  insertStart:"08:35:17.633", insertEnd:"08:35:20.260",
+  firstArrival:"08:35:19.407", lastArrival:"08:35:58.666",
+  debit:6258, credit:3742, modRT:8045, modAC:1487, modIC:468,
+  oraAczb:10000, oraNipDC:2943, oraNipIC:2996, oraPR:8045,
   // per-5s arrival buckets
   arrival:[
-    {t:"05:58:30",n:1454},{t:"05:58:35",n:1026},{t:"05:58:40",n:1254},
-    {t:"05:58:45",n:1535},{t:"05:58:50",n:1191},{t:"05:58:55",n:912},
-    {t:"05:59:00",n:912},{t:"05:59:05",n:1140},{t:"05:59:10",n:1289},
+    {t:"08:35:19",n:1585},{t:"08:35:25",n:1140},{t:"08:35:30",n:1482},
+    {t:"08:35:35",n:1515},{t:"08:35:39",n:684},{t:"08:35:44",n:1140},
+    {t:"08:35:49",n:1140},{t:"08:35:54",n:912},{t:"08:35:58",n:402},
   ],
-  // resource usage (idle / post-test snapshot)
-  oracle:{cpuI:37,memI:2577},
-  debezium:{cpuI:14,memI:1829},
-  consumer:{cpuI:"6-6",memI:"177-242"},
-  kafka:{cpu0:52,cpu1:53,cpu2:68,mem0:2081,mem1:2092,mem2:2039},
+  // resource usage (post-test snapshot, tuned settings)
+  oracle:{cpuI:61,memI:2605},
+  debezium:{cpuI:39,memI:1830},
+  consumer:{cpuI:"7-7",memI:"192-252"},
+  kafka:{cpu0:52,cpu1:47,cpu2:63,mem0:2039,mem1:1879,mem2:1842},
 };
 
 // Timeline labels for resource charts
-const tL=["05:58:30","05:58:35","05:58:40","05:58:45","05:58:50","05:58:55",
-  "05:59:00","05:59:05","05:59:10"];
+const tL=["08:35:19","08:35:25","08:35:30","08:35:35","08:35:39","08:35:44",
+  "08:35:49","08:35:54","08:35:58"];
 
 /* ── helpers ── */
 function sec(t,y){
@@ -104,7 +104,7 @@ kpi(L+3*(bw+5),93,bw,bh,"CDC Latency",D.cdcLatency+"s","commit >> first arrival"
 
 let y=sec("Pipeline Timing",160);
 y=tbl(["Phase","Duration","Detail"],[
-  ["Oracle INSERT (source)",D.oracleInsert+"s","10,000 transactions >> 24,046 rows across 4 tables (ACZB_HISTORY, NIPX_*, PAYMENT_ROUTER)"],
+  ["Oracle INSERT (source)",D.oracleInsert+"s","10,000 transactions >> 26,695 rows across 4 tables (ACZB_HISTORY, NIPX_*, PAYMENT_ROUTER)"],
   ["CDC Capture Latency",D.cdcLatency+"s","First records arrived in PostgreSQL while Oracle INSERT was still running (streaming overlap)"],
   ["CDC Pipeline Delivery",D.deliveryTime+"s","First arrival >> last record lands in PostgreSQL"],
   ["Total End-to-End",D.totalE2E+"s",`INSERT start >> last record in PostgreSQL (${D.startUTC} >> ${D.endUTC})`],
@@ -112,10 +112,10 @@ y=tbl(["Phase","Duration","Detail"],[
 
 y=sec("Oracle Source Table Breakdown",y+5);
 y=tbl(["Source Table","Schema","Oracle Rows","Delivered (PG)","Module"],[
-  ["ACZB_HISTORY","ABFCUBSLIVE",D.oraAczb.toLocaleString(),"1,526","AC"],
+  ["ACZB_HISTORY","ABFCUBSLIVE",D.oraAczb.toLocaleString(),"1,487","AC"],
   ["NIPX_DIRECT_CREDITS","NIPSYSTEM",D.oraNipDC.toLocaleString(),"--","--"],
-  ["NIPX_INBOUND_CREDITS","NIPSYSTEM",D.oraNipIC.toLocaleString(),"514","IC"],
-  ["PAYMENT_ROUTER_TXN_LOG","WEBSERVE",D.oraPR.toLocaleString(),"7,960","RT"],
+  ["NIPX_INBOUND_CREDITS","NIPSYSTEM",D.oraNipIC.toLocaleString(),"468","IC"],
+  ["PAYMENT_ROUTER_TXN_LOG","WEBSERVE",D.oraPR.toLocaleString(),"8,045","RT"],
   ["TOTAL","",D.oracleRows.toLocaleString(),D.records.toLocaleString(),""],
 ],y,[130,90,80,80,135],["left","left","center","center","left"]);
 
@@ -159,10 +159,10 @@ y=tbl(["Component","Role","CPU (idle)","Memory (idle)","Namespace"],[
 
 y=sec("Delivery Flow Analysis",y+8);
 const flowNotes = [
-  "First 5 seconds: Initial burst of 1,454 records. CDC streaming began as Oracle INSERT completed at 05:58:31.",
-  "Seconds 5-20: Sustained delivery at 1,026-1,535 records per 5s bucket as Debezium processed redo log entries.",
-  "Seconds 20-45: Steady-state delivery at ~228 records/sec in uniform batches, characteristic of LogMiner's poll-sleep cycle with max.batch.size=2048.",
-  "Final records arrived at 05:59:14. Total delivery window 43.45s at 230.2 TPS.",
+  "First 5 seconds: Initial burst of 1,585 records. CDC streaming began 1.77s after Oracle INSERT started -- records arrived WHILE Oracle was still inserting (tuned 200ms sleep + 100ms poll).",
+  "Seconds 5-18: Sustained delivery at 1,140-1,515 records per 5s bucket as Debezium processed redo log entries with tuned 50K batch size.",
+  "Seconds 18-39: Steady-state delivery at ~228 records/sec. LogMiner's poll-sleep cycle (50ms increment, 1s max) settled into uniform batching with max.batch.size=4096.",
+  "Final records arrived at 08:35:58. Total delivery window 39.26s at 254.7 TPS -- 10.7% faster than default settings (43.45s / 230.2 TPS).",
 ];
 flowNotes.forEach(b=>{
   doc.font("Helvetica").fontSize(7).fillColor(DARK).text("  - "+b,L,y,{width:PW,lineGap:1});
@@ -176,7 +176,8 @@ const observations = [
   `CDC capture latency was ${D.cdcLatency}s -- first PostgreSQL records arrived just after Oracle INSERT completed.`,
   `${(D.oracleRows - D.records).toLocaleString()} Oracle rows (${((D.oracleRows - D.records)/D.oracleRows*100).toFixed(1)}%) were filtered by Debezium Groovy predicates (POV-scoped account filtering). Only matching records were forwarded to Kafka.`,
   `Transaction mix: ${(D.debit/D.records*100).toFixed(1)}% Debit, ${(D.credit/D.records*100).toFixed(1)}% Credit. Payment Router (RT) accounted for ${(D.modRT/D.records*100).toFixed(1)}% of delivered records.`,
-  `Delivery window was ${D.deliveryTime}s with sustained arrival rate of ~228 records/sec. The uniform batching pattern is characteristic of LogMiner's poll-sleep cycle.`,
+  `Delivery window was ${D.deliveryTime}s with tuned LogMiner settings (50K batch, 200ms sleep, 100ms poll). 10.7% faster than default settings (43.45s / 230.2 TPS).`,
+  `Tuned settings reduced CDC latency by 60% (1.77s vs 4.41s default) -- records arrived while Oracle INSERT was still running.`,
 ];
 observations.forEach(b=>{
   doc.font("Helvetica").fontSize(7).fillColor(DARK).text("  - "+b,L,y,{width:PW,lineGap:1});
