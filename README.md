@@ -129,9 +129,23 @@ sqlplus C##DEBEZIUM/oracle@//localhost:1521/ACCESSBANK @scripts/simulation/cdc-t
 sqlplus C##DEBEZIUM/oracle@//localhost:1521/ACCESSBANK @scripts/simulation/cdc-seed-data-simulation.sql
 ```
 
+## 9. Load Testing & Reports
+
+See [`load-tests/README.md`](load-tests/README.md) for full procedures.
+
+```bash
+cd load-tests && npm install
+
+# Run CDC pipeline test (100K transactions)
+./scripts/cdc-pipeline-test.sh 100000
+
+# Generate PDF performance report
+npm run report:final
+```
+
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Error | Fix |
 |-------|-----|
@@ -154,9 +168,16 @@ curl -s http://localhost:8083/connectors/accessbank-core-banking-connector/statu
 
 ```
 ├── README.md
-├── docker-compose.yml          # Infrastructure dependencies
-└── scripts/
-    ├── connectors/             # Connector creation scripts
-    ├── oracle/                 # DBA preparation SQL
-    └── simulation/             # Dev/test table & seed data
+├── docker-compose.yml              # Infrastructure dependencies
+├── scripts/
+│   ├── connectors/                 # Connector creation scripts
+│   ├── oracle/                     # DBA preparation SQL
+│   └── simulation/                 # Dev/test table & seed data
+└── load-tests/
+    ├── README.md                   # Test & report procedures
+    ├── package.json                # Node deps (pdfkit)
+    ├── scripts/                    # Test scripts & report generators
+    ├── envs/                       # Environment configs (gitignored)
+    ├── k8s/                        # Kubernetes Job manifests
+    └── reports/                    # Generated output (gitignored)
 ```

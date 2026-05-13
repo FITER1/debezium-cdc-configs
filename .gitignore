@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Generated reports (PDFs, HTML, JSON, CSV output)
+load-tests/reports/**/*.pdf
+load-tests/reports/**/*.html
+load-tests/reports/**/*.json
+load-tests/reports/**/*.csv
+load-tests/reports/**/*.txt
+load-tests/reports/cdc-pipeline/
+load-tests/reports/in-cluster/
+load-tests/reports/monitored-run/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Env files with secrets (template is committed)
+load-tests/envs/*.env
+!load-tests/envs/*.template
+

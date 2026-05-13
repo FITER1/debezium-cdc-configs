@@ -96,16 +96,19 @@ AS
     v_amount         NUMBER;
     v_trn_dt         DATE;
     v_trn_ts         TIMESTAMP;
-    v_ext_ref        VARCHAR2(35);
-    v_trn_ref        VARCHAR2(16);
+    v_ext_ref        VARCHAR2(40);
+    v_trn_ref        VARCHAR2(20);
     v_session_id     VARCHAR2(100);
     v_drcr           CHAR(1);
     v_product        VARCHAR2(4);
     v_standalone_idx PLS_INTEGER;
     v_channel        VARCHAR2(20);
     v_narration      VARCHAR2(500);
+    v_run_id         VARCHAR2(6);  -- unique per run to avoid PK collisions
 
 BEGIN
+    -- Generate a run-unique prefix from current timestamp (HHMMSS)
+    v_run_id := TO_CHAR(SYSTIMESTAMP, 'HH24MISS');
     -- Start from current max to avoid PK violations on re-runs
     SELECT NVL(MAX(AC_ENTRY_SR_NO), 400000000000) INTO v_entry_sr_no FROM abfcubslive.ACZB_HISTORY;
     DBMS_OUTPUT.PUT_LINE('Starting AC_ENTRY_SR_NO from: ' || (v_entry_sr_no + 1));
@@ -117,7 +120,7 @@ BEGIN
         v_acct_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));  -- 1-10
         v_trn_dt := TRUNC(SYSDATE) - TRUNC(DBMS_RANDOM.VALUE(0, 30));
         v_trn_ts := v_trn_dt + DBMS_RANDOM.VALUE(0, 1);  -- random time of day
-        v_trn_ref := 'FT' || TO_CHAR(v_trn_dt, 'YYMMDDHH24') || LPAD(i, 5, '0');
+        v_trn_ref := 'FT' || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(i, 7, '0');
 
         -- ================================================================
         -- 30% NIP OUTGOING (RTFT) -> ACZB_HISTORY + NIPX_DIRECT_CREDITS + PAYMENT_ROUTER_TXN_LOG
@@ -126,7 +129,7 @@ BEGIN
             v_amount := TRUNC(DBMS_RANDOM.VALUE(5000, 5000000));
             v_bank_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_bank_codes.COUNT + 1));
             v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
-            v_ext_ref := 'NIP-' || TO_CHAR(v_trn_dt, 'YYMMDD') || '-C' || v_acct_idx || '-' || LPAD(i, 4, '0');
+            v_ext_ref := 'NIP-' || v_run_id || '-C' || v_acct_idx || '-' || LPAD(i, 7, '0');
             v_session_id := '000014' || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(TRUNC(DBMS_RANDOM.VALUE(100000, 999999)), 6, '0');
             v_channel := CASE TRUNC(DBMS_RANDOM.VALUE(1, 5))
                             WHEN 1 THEN 'MOBILE'
@@ -178,7 +181,7 @@ BEGIN
             v_amount := TRUNC(DBMS_RANDOM.VALUE(1000, 10000000));
             v_bank_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_bank_codes.COUNT + 1));
             v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
-            v_ext_ref := 'NIP-' || TO_CHAR(v_trn_dt, 'YYMMDD') || '-IN' || v_acct_idx || '-' || LPAD(i, 4, '0');
+            v_ext_ref := 'NIP-' || v_run_id || '-IN' || v_acct_idx || '-' || LPAD(i, 7, '0');
             v_session_id := v_bank_codes(v_bank_idx) || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(TRUNC(DBMS_RANDOM.VALUE(100000, 999999)), 6, '0');
             v_narration := 'Credit from ' || v_ext_names(v_dest_idx) || ' via NIP';
 
@@ -228,7 +231,7 @@ BEGIN
                 v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
             END LOOP;
             v_product := v_intra_products(TRUNC(DBMS_RANDOM.VALUE(1, 5)));
-            v_ext_ref := 'MSG-' || TO_CHAR(v_trn_dt, 'YYMMDD') || '-C' || v_acct_idx || '-' || LPAD(i, 4, '0');
+            v_ext_ref := 'MSG-' || v_run_id || '-C' || v_acct_idx || '-' || LPAD(i, 7, '0');
             v_channel := CASE v_product
                             WHEN 'RTMO' THEN 'MOBILE'
                             WHEN 'RTUS' THEN 'USSD'

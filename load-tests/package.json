@@ -1,0 +1,23 @@
+{
+  "name": "cdc-load-tests",
+  "version": "1.0.0",
+  "description": "Load tests and performance reporting for the Access Bank CDC pipeline.",
+  "private": true,
+  "scripts": {
+    "report:1k": "node scripts/generate-1k-report.js",
+    "report:10k": "node scripts/generate-10k-report.js",
+    "report:100k-tuned": "node scripts/generate-100k-tuned-report.js",
+    "report:100k-clean": "node scripts/generate-100k-clean-report.js",
+    "report:100k-defaults": "node scripts/generate-100k-performance-report.js",
+    "report:1m": "node scripts/generate-cdc-pipeline-report.js",
+    "report:final": "node scripts/generate-final-report.js",
+    "report:k6-api": "node scripts/generate-k6-api-report.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "pdfkit": "^0.18.0"
+  }
+}

@@ -1,0 +1,104 @@
+# =============================================================================
+# k6 Load Test — Kubernetes Job
+# =============================================================================
+# Runs the API load test inside the cluster for accurate latency measurement.
+#
+# Usage:
+#   kubectl apply -f load-tests/k8s/k6-job.yaml
+#   kubectl -n access logs -f job/k6-api-load-test
+#   kubectl -n access delete job k6-api-load-test
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-api-load-test
+  namespace: access
+  labels:
+    app: k6-load-test
+    test: access-bank-cdc
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: k6-load-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.54.0
+          command:
+            - k6
+            - run
+            - /scripts/api-load-test.js
+          env:
+            - name: BASE_URL
+              value: "http://access-synapse:8444"
+            - name: AUTH_TOKEN
+              value: "bWlmb3M6cGFzc3dvcmQ="
+            - name: TENANT_ID
+              value: "default"
+            - name: ACCOUNTS
+              value: "0011234501,0021234502,0031234503,0011234504,0021234505,0031234506,0011234507,0021234508,0031234509,0011234510"
+            - name: VUS_STAGE_1
+              value: "100"
+            - name: VUS_STAGE_2
+              value: "250"
+            - name: VUS_STAGE_3
+              value: "500"
+            - name: VUS_STAGE_4
+              value: "500"
+            - name: VUS_STAGE_5
+              value: "100"
+            - name: REPORT_DIR
+              value: "/results"
+            - name: DUR_STAGE_1
+              value: "1m"
+            - name: DUR_STAGE_2
+              value: "1m"
+            - name: DUR_STAGE_3
+              value: "1m"
+            - name: DUR_STAGE_4
+              value: "1m"
+            - name: DUR_STAGE_5
+              value: "1m"
+            - name: EMBED_REPORTS
+              value: "true"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: results
+              mountPath: /results
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+      volumes:
+        - name: scripts
+          configMap:
+            name: k6-load-test-scripts
+        - name: results
+          emptyDir: {}
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: access
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: In
+                    values:
+                      - access-nodepool
+# ---
+# ConfigMap is created separately via:
+#   kubectl create configmap k6-load-test-scripts \
+#     --from-file=api-load-test.js=load-tests/scripts/api-load-test.js \
+#     -n access

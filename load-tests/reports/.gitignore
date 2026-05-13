@@ -1,0 +1,4 @@
+# All generated output is ignored by the root .gitignore.
+# This file ensures the reports/ directory is created by git.
+*
+!.gitignore
