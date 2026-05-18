@@ -6,6 +6,7 @@ services:
       ORACLE_PASSWORD: oracle
       ORACLE_DATABASE: ACCESSBANK
       ORACLE_CHARACTERSET: AL32UTF8
+      TZ: Africa/Nairobi
     ports:
       - "1521:1521"
     healthcheck:

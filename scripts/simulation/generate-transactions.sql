@@ -13,9 +13,12 @@
 --   For 1000 transactions: exec GENERATE_CDC_TRANSACTIONS(1000);
 --
 -- Prerequisites:
---   - Customers and accounts must already exist (cdc-seed-data-simulation.sql)
+--   - Customers and accounts must already exist (account-data-simulation.sql)
 --   - NIPX_BANKS and CSTM_PRODUCT_INTERFACE_MAPPING must be seeded
 --   - AC_ENTRY_SR_NO starts from 400000000001
+--
+-- Account Pool: Loaded dynamically from STZM_CUST_ACCOUNT / STZM_CUSTOMER
+--   Supports any number of accounts (tested with 5,000)
 --
 -- Transaction Distribution (realistic):
 --   60% Interbank NIP (30% outgoing RTFT, 30% incoming RTIN)
@@ -25,45 +28,29 @@
 -- Date Range: Last 30 days
 -- ============================================================================
 
-CREATE OR REPLACE PROCEDURE GENERATE_CDC_TRANSACTIONS(p_count IN NUMBER DEFAULT 1000)
+CREATE OR REPLACE PROCEDURE GENERATE_CDC_TRANSACTIONS(
+    p_count     IN NUMBER DEFAULT 1000,
+    p_delay_sec IN NUMBER DEFAULT 0    -- seconds to pause between each committed batch (0 = no delay)
+)
 AS
-    -- Account pool
-    TYPE t_accounts IS TABLE OF VARCHAR2(20);
-    v_accounts t_accounts := t_accounts(
-        '0011234501', '0021234502', '0031234503', '0011234504', '0021234505',
-        '0031234506', '0011234507', '0021234508', '0031234509', '0011234510'
-    );
+    -- Dynamic account pool (loaded from DB)
+    TYPE t_varchar_tab IS TABLE OF VARCHAR2(200) INDEX BY PLS_INTEGER;
+    v_accounts   t_varchar_tab;
+    v_branches   t_varchar_tab;
+    v_customers  t_varchar_tab;
+    v_names      t_varchar_tab;
+    v_acct_count PLS_INTEGER;
 
-    -- Branch mapping (derived from account prefix)
-    TYPE t_branches IS TABLE OF VARCHAR2(3);
-    v_branches t_branches := t_branches(
-        '001', '002', '003', '001', '002',
-        '003', '001', '002', '003', '001'
-    );
-
-    -- Customer mapping
-    TYPE t_customers IS TABLE OF VARCHAR2(9);
-    v_customers t_customers := t_customers(
-        '100001', '100002', '100003', '100004', '100005',
-        '100006', '100007', '100008', '100009', '100010'
-    );
-
-    -- Customer names for NIP
-    TYPE t_names IS TABLE OF VARCHAR2(200);
-    v_names t_names := t_names(
-        'Adebayo Ogunlesi', 'Chioma Nwosu', 'Emeka Obiora', 'Funke Akindele', 'Ibrahim Musa',
-        'Ngozi Okafor', 'Tunde Bakare', 'Amina Yusuf', 'Olumide Adeyemi', 'Blessing Eze'
-    );
-
-    -- External bank accounts (for NIP destinations)
+    -- External bank accounts (for NIP destinations — other banks, static)
     TYPE t_ext_accounts IS TABLE OF VARCHAR2(20);
     v_ext_accounts t_ext_accounts := t_ext_accounts(
         '2012345678', '3045678901', '5067891234', '1098765432', '4056789012',
         '8012345678', '9087654321', '6034567890', '7023456789', '2056781234'
     );
 
-    -- External bank names
-    v_ext_names t_names := t_names(
+    -- External bank names (other bank customers, static)
+    TYPE t_names_s IS TABLE OF VARCHAR2(200);
+    v_ext_names t_names_s := t_names_s(
         'Chinedu Okoro', 'Fatima Abdullahi', 'Oluwaseun Balogun', 'Grace Nneka', 'Musa Abdullahi',
         'Temitope Adesanya', 'Yusuf Mohammed', 'Amaka Obi', 'Damilola Adekunle', 'Hauwa Ibrahim'
     );
@@ -107,17 +94,32 @@ AS
     v_run_id         VARCHAR2(6);  -- unique per run to avoid PK collisions
 
 BEGIN
+    -- ================================================================
+    -- Load accounts dynamically from seeded reference data
+    -- ================================================================
+    SELECT a.CUST_AC_NO, a.BRANCH_CODE, a.CUST_NO, c.CUSTOMER_NAME1
+    BULK COLLECT INTO v_accounts, v_branches, v_customers, v_names
+    FROM abfcubslive.STZM_CUST_ACCOUNT a
+    JOIN abfcubslive.STZM_CUSTOMER c ON a.CUST_NO = c.CUSTOMER_NO
+    ORDER BY a.CUST_AC_NO;
+
+    v_acct_count := v_accounts.COUNT;
+    IF v_acct_count = 0 THEN
+        DBMS_OUTPUT.PUT_LINE('ERROR: No accounts found. Run account-data-simulation.sql first.');
+        RETURN;
+    END IF;
+
     -- Generate a run-unique prefix from current timestamp (HHMMSS)
     v_run_id := TO_CHAR(SYSTIMESTAMP, 'HH24MISS');
     -- Start from current max to avoid PK violations on re-runs
     SELECT NVL(MAX(AC_ENTRY_SR_NO), 400000000000) INTO v_entry_sr_no FROM abfcubslive.ACZB_HISTORY;
     DBMS_OUTPUT.PUT_LINE('Starting AC_ENTRY_SR_NO from: ' || (v_entry_sr_no + 1));
-    DBMS_OUTPUT.PUT_LINE('Generating ' || p_count || ' CDC transactions...');
+    DBMS_OUTPUT.PUT_LINE('Generating ' || p_count || ' CDC transactions across ' || v_acct_count || ' accounts...');
 
     FOR i IN 1..p_count LOOP
         v_entry_sr_no := v_entry_sr_no + 1;
         v_rand := DBMS_RANDOM.VALUE(0, 100);
-        v_acct_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));  -- 1-10
+        v_acct_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_acct_count + 1));
         v_trn_dt := TRUNC(SYSDATE) - TRUNC(DBMS_RANDOM.VALUE(0, 30));
         v_trn_ts := v_trn_dt + DBMS_RANDOM.VALUE(0, 1);  -- random time of day
         v_trn_ref := 'FT' || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(i, 7, '0');
@@ -128,7 +130,7 @@ BEGIN
         IF v_rand < 30 THEN
             v_amount := TRUNC(DBMS_RANDOM.VALUE(5000, 5000000));
             v_bank_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_bank_codes.COUNT + 1));
-            v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
+            v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_ext_accounts.COUNT + 1));
             v_ext_ref := 'NIP-' || v_run_id || '-C' || v_acct_idx || '-' || LPAD(i, 7, '0');
             v_session_id := '000014' || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(TRUNC(DBMS_RANDOM.VALUE(100000, 999999)), 6, '0');
             v_channel := CASE TRUNC(DBMS_RANDOM.VALUE(1, 5))
@@ -144,12 +146,12 @@ BEGIN
                 AC_ENTRY_SR_NO, AC_NO, TRN_REF_NO, AC_CCY, DRCR_IND, TRN_CODE,
                 FCY_AMOUNT, LCY_AMOUNT, TRN_DT, VALUE_DT, STMT_DT,
                 MODULE, EVENT, EVENT_SR_NO, AC_BRANCH, PRODUCT,
-                EXTERNAL_REF_NO, RELATED_ACCOUNT, AUTH_TIMESTAMP
+                EXTERNAL_REF_NO, RELATED_ACCOUNT, AUTH_TIMESTAMP, SAVE_TIMESTAMP
             ) VALUES (
                 v_entry_sr_no, v_accounts(v_acct_idx), v_trn_ref, 'NGN', 'D', '960',
                 v_amount, v_amount, v_trn_dt, v_trn_dt, v_trn_dt,
                 'RT', 'INIT', 1, v_branches(v_acct_idx), 'RTFT',
-                v_ext_ref, v_ext_accounts(v_dest_idx), v_trn_ts
+                v_ext_ref, v_ext_accounts(v_dest_idx), v_trn_ts, SYSTIMESTAMP
             );
 
             -- NIPX_DIRECT_CREDITS
@@ -180,7 +182,7 @@ BEGIN
         ELSIF v_rand < 60 THEN
             v_amount := TRUNC(DBMS_RANDOM.VALUE(1000, 10000000));
             v_bank_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_bank_codes.COUNT + 1));
-            v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
+            v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_ext_accounts.COUNT + 1));
             v_ext_ref := 'NIP-' || v_run_id || '-IN' || v_acct_idx || '-' || LPAD(i, 7, '0');
             v_session_id := v_bank_codes(v_bank_idx) || TO_CHAR(v_trn_dt, 'YYMMDD') || LPAD(TRUNC(DBMS_RANDOM.VALUE(100000, 999999)), 6, '0');
             v_narration := 'Credit from ' || v_ext_names(v_dest_idx) || ' via NIP';
@@ -190,12 +192,12 @@ BEGIN
                 AC_ENTRY_SR_NO, AC_NO, TRN_REF_NO, AC_CCY, DRCR_IND, TRN_CODE,
                 FCY_AMOUNT, LCY_AMOUNT, TRN_DT, VALUE_DT, STMT_DT,
                 MODULE, EVENT, EVENT_SR_NO, AC_BRANCH, PRODUCT,
-                EXTERNAL_REF_NO, AUTH_TIMESTAMP
+                EXTERNAL_REF_NO, AUTH_TIMESTAMP, SAVE_TIMESTAMP
             ) VALUES (
                 v_entry_sr_no, v_accounts(v_acct_idx), v_trn_ref, 'NGN', 'C', '009',
                 v_amount, v_amount, v_trn_dt, v_trn_dt, v_trn_dt,
                 'RT', 'INIT', 1, v_branches(v_acct_idx), 'RTIN',
-                v_ext_ref, v_trn_ts
+                v_ext_ref, v_trn_ts, SYSTIMESTAMP
             );
 
             -- NIPX_INBOUND_CREDITS
@@ -228,7 +230,7 @@ BEGIN
             -- Pick a different account as destination
             v_dest_idx := v_acct_idx;
             WHILE v_dest_idx = v_acct_idx LOOP
-                v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, 11));
+                v_dest_idx := TRUNC(DBMS_RANDOM.VALUE(1, v_acct_count + 1));
             END LOOP;
             v_product := v_intra_products(TRUNC(DBMS_RANDOM.VALUE(1, 5)));
             v_ext_ref := 'MSG-' || v_run_id || '-C' || v_acct_idx || '-' || LPAD(i, 7, '0');
@@ -245,13 +247,13 @@ BEGIN
                 AC_ENTRY_SR_NO, AC_NO, TRN_REF_NO, AC_CCY, DRCR_IND, TRN_CODE,
                 FCY_AMOUNT, LCY_AMOUNT, TRN_DT, VALUE_DT, STMT_DT,
                 MODULE, EVENT, EVENT_SR_NO, AC_BRANCH, PRODUCT,
-                RELATED_ACCOUNT, EXTERNAL_REF_NO, AUTH_TIMESTAMP
+                RELATED_ACCOUNT, EXTERNAL_REF_NO, AUTH_TIMESTAMP, SAVE_TIMESTAMP
             ) VALUES (
                 v_entry_sr_no, v_accounts(v_acct_idx), v_trn_ref, 'NGN', 'D',
                 CASE v_product WHEN 'RTUS' THEN '950' WHEN 'RTMO' THEN '960' ELSE '100' END,
                 v_amount, v_amount, v_trn_dt, v_trn_dt, v_trn_dt,
                 'RT', 'INIT', 1, v_branches(v_acct_idx), v_product,
-                v_accounts(v_dest_idx), v_ext_ref, v_trn_ts
+                v_accounts(v_dest_idx), v_ext_ref, v_trn_ts, SYSTIMESTAMP
             );
 
             -- PAYMENT_ROUTER_TXN_LOG
@@ -293,20 +295,24 @@ BEGIN
             INSERT INTO abfcubslive.ACZB_HISTORY (
                 AC_ENTRY_SR_NO, AC_NO, TRN_REF_NO, AC_CCY, DRCR_IND, TRN_CODE,
                 FCY_AMOUNT, LCY_AMOUNT, TRN_DT, VALUE_DT, STMT_DT,
-                MODULE, EVENT, EVENT_SR_NO, AC_BRANCH, AUTH_TIMESTAMP
+                MODULE, EVENT, EVENT_SR_NO, AC_BRANCH, AUTH_TIMESTAMP, SAVE_TIMESTAMP
             ) VALUES (
                 v_entry_sr_no, v_accounts(v_acct_idx), v_trn_ref, 'NGN',
                 v_drcr, v_sa_trn_codes(v_standalone_idx),
                 v_amount, v_amount, v_trn_dt, v_trn_dt, v_trn_dt,
                 v_sa_modules(v_standalone_idx), 'INIT', 1,
-                v_branches(v_acct_idx), v_trn_ts
+                v_branches(v_acct_idx), v_trn_ts, SYSTIMESTAMP
             );
         END IF;
 
         -- Commit every 100 records
         IF MOD(i, 100) = 0 THEN
             COMMIT;
-            DBMS_OUTPUT.PUT_LINE('  Inserted ' || i || ' / ' || p_count || ' transactions');
+            DBMS_OUTPUT.PUT_LINE('  Inserted ' || i || ' / ' || p_count || ' transactions (@ ' || TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS.FF3') || ')');
+            -- Optional delay between batches to simulate realistic transaction flow
+            IF p_delay_sec > 0 AND i < p_count THEN
+                DBMS_SESSION.SLEEP(p_delay_sec);
+            END IF;
         END IF;
     END LOOP;
 
@@ -323,17 +329,17 @@ END;
 -- Uncomment the desired line below and run:
 -- ============================================================================
 
--- Generate 10 transactions:
--- BEGIN
---     GENERATE_CDC_TRANSACTIONS(90);
--- END;
-
--- Generate 100 transactions:
+-- Generate 100 transactions (burst, no delay):
 -- BEGIN
 --     GENERATE_CDC_TRANSACTIONS(100);
 -- END;
 
--- Generate 1000 transactions:
+-- Generate 1000 transactions with 2s pause between each 100-record batch:
 -- BEGIN
---     GENERATE_CDC_TRANSACTIONS(1000);
+--     GENERATE_CDC_TRANSACTIONS(1000, 2);
+-- END;
+
+-- Generate 1000 transactions with 5s pause (simulates ~20 TPS steady state):
+-- BEGIN
+--     GENERATE_CDC_TRANSACTIONS(1000, 5);
 -- END;

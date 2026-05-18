@@ -12,7 +12,8 @@
     "report:1m": "node scripts/generate-cdc-pipeline-report.js",
     "report:final": "node scripts/generate-final-report.js",
     "report:k6-api": "node scripts/generate-k6-api-report.js",
-    "report:100k": "node scripts/generate-100k-report.js"
+    "report:100k": "node scripts/generate-100k-report.js",
+    "report:latency": "node scripts/generate-latency-report.js"
   },
   "keywords": [],
   "author": "",
