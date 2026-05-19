@@ -1,0 +1,16 @@
+{{- range $connector := list .Values.connectors.coreBanking .Values.connectors.nipSystem .Values.connectors.webserve }}
+{{- range $table := $connector.tableIncludeList }}
+{{- $topicName := printf "%s.%s" $connector.topicPrefix (replace "." "." $table) }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: {{ $topicName | replace "." "-" | lower }}
+  labels:
+    strimzi.io/cluster: cdc-kafka
+    {{- include "access-cdc.labels" $ | nindent 4 }}
+spec:
+  partitions: {{ $.Values.cdcTopics.partitions }}
+  replicas: {{ $.Values.cdcTopics.replicas }}
+{{- end }}
+{{- end }}

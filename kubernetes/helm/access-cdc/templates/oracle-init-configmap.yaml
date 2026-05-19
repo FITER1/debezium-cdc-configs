@@ -1,0 +1,39 @@
+{{- if .Values.oracle.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oracle-init-scripts
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  001-enable-archivelog.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    log_mode="$(sqlplus -s / as sysdba <<'SQL'
+    SET HEADING OFF FEEDBACK OFF PAGESIZE 0 VERIFY OFF ECHO OFF
+    SELECT log_mode FROM v$database;
+    EXIT;
+    SQL
+    )"
+    log_mode="$(printf '%s' "${log_mode}" | tr -d '[:space:]')"
+
+    if [ "${log_mode}" = "ARCHIVELOG" ]; then
+      echo "ARCHIVELOG already enabled"
+      exit 0
+    fi
+
+    echo "Enabling ARCHIVELOG mode"
+    sqlplus -s / as sysdba <<'SQL'
+    WHENEVER SQLERROR EXIT SQL.SQLCODE
+    SHUTDOWN IMMEDIATE;
+    STARTUP MOUNT;
+    ALTER DATABASE ARCHIVELOG;
+    ALTER DATABASE OPEN;
+    ALTER PLUGGABLE DATABASE ALL OPEN;
+    ALTER PLUGGABLE DATABASE ALL SAVE STATE;
+    EXIT;
+    SQL
+{{- end }}

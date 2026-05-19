@@ -1,0 +1,195 @@
+# Shared
+namespace: access-cdc
+clusterSecretStore: external-secret-cluster-store
+secretRefName: kubernetes/fiter-us-east-2-dev/access-cdc/oracle
+
+# Co-tenancy: side stack rides on the tigerbeetle nodepool to avoid spinning a new pool.
+# TB pods have podAntiAffinity on hostname so each takes its own node — Oracle/Connect land elsewhere.
+nodepool:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.sh/nodepool
+                operator: In
+                values:
+                  - tigerbeetle-nodepool
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: tigerbeetle
+      effect: NoSchedule
+
+oracle:
+  enabled: true
+  image:
+    repository: gvenzl/oracle-xe
+    tag: "21-slim"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  serviceName: oracle-xe
+  port: 1521
+  cdbName: XE
+  pdbName: ACCESSBANK
+  characterSet: AL32UTF8
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 54321
+    runAsGroup: 54321
+    fsGroup: 54321
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      memory: 4Gi
+  storage:
+    size: 20Gi
+    storageClassName: gp3
+    accessModes: [ReadWriteOnce]
+  # Schemas created by the prep job and granted LogMiner privileges
+  schemas:
+    - ABFCUBSLIVE
+    - NIPSYSTEM
+    - WEBSERVE
+  # Remote secret properties under secretRefName used for schema passwords.
+  # Throwaway side stack: reuse app_password across all schemas to avoid extra terraform.
+  schemaPasswordProperties:
+    ABFCUBSLIVE: app_password
+    NIPSYSTEM: app_password
+    WEBSERVE: app_password
+  appUser: C##CDC
+  prep:
+    activeDeadlineSeconds: 900
+    tcpWaitAttempts: 120
+    sqlWaitAttempts: 60
+    initResources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        memory: 64Mi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+# Strimzi KafkaConnect cluster dedicated to Access (independent of qicard's)
+kafkaConnect:
+  name: access-connect
+  replicas: 1
+  version: "3.8.1"
+  bootstrapServers: "cdc-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+  tls: false
+  image: "916148231619.dkr.ecr.us-east-2.amazonaws.com/core/kafka-connect-debezium:latest"
+  config:
+    groupId: access-connect-cluster
+    offsetStorageTopic: access-connect-cluster-offsets
+    configStorageTopic: access-connect-cluster-configs
+    statusStorageTopic: access-connect-cluster-status
+    storageReplicationFactor: 3
+  resources:
+    requests:
+      cpu: "500m"
+      memory: 2Gi
+    limits:
+      cpu: "2000m"
+      memory: 3Gi
+  jvmOptions:
+    -Xms: "1536m"
+    -Xmx: "1536m"
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+networkPolicy:
+  enabled: true
+  allowedNamespaces:
+    - access-cdc
+    - kafka
+
+# Three Debezium Oracle connectors
+connectors:
+  common:
+    tasksMax: 1
+    snapshotMode: initial
+    logMiningStrategy: online_catalog
+    decimalHandlingMode: double
+    tombstonesOnDelete: true
+    includeSchemaChanges: false
+    schemaHistoryBootstrap: "cdc-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+
+    #### LogMiner settings — tuned for 500+ TPS (2026-05-13)#####
+    logMiningBatchSizeDefault: 50000
+    logMiningBatchSizeMax: 200000
+    logMiningBatchSizeMin: 1000
+    logMiningSleepTimeDefaultMs: 200
+    logMiningSleepTimeIncrementMs: 50
+    logMiningSleepTimeMaxMs: 1000
+    logMiningSleepTimeMinMs: 0
+    maxBatchSize: 4096
+    maxQueueSize: 16384
+    pollIntervalMs: 100
+    logMiningQueryFilterMode: in
+    heartbeatIntervalMs: 10000
+
+  coreBanking:
+    name: access-core-banking
+    topicPrefix: accessbank-core
+    schemaIncludeList: ABFCUBSLIVE
+    tableIncludeList:
+      - ABFCUBSLIVE.ACZB_HISTORY
+      - ABFCUBSLIVE.ACZB_DAILY_LOG
+      - ABFCUBSLIVE.STZM_CUST_ACCOUNT
+      - ABFCUBSLIVE.STZM_TRN_CODE
+    # pov filter — only accounts in range pass through
+    # pov:
+    #   accountRange:
+    #     min: 1
+    #     max: 5000
+
+  nipSystem:
+    name: access-nip-system
+    topicPrefix: accessbank-nip
+    schemaIncludeList: NIPSYSTEM
+    tableIncludeList:
+      - NIPSYSTEM.NIPX_DIRECT_CREDITS
+      - NIPSYSTEM.NIPX_BANKS
+      - NIPSYSTEM.NIPX_INBOUND_CREDITS
+
+  webserve:
+    name: access-webserve
+    topicPrefix: accessbank-webserve
+    schemaIncludeList: WEBSERVE
+    tableIncludeList:
+      - WEBSERVE.PAYMENT_ROUTER_TXN_LOG
+      - WEBSERVE.CSTM_PRODUCT_INTERFACE_MAPPING
+
+cdcTopics:
+  partitions: 4
+  replicas: 3
+
+# ExternalSecret for oracle-credentials
+externalSecret:
+  enabled: true
+  refreshInterval: 1h
+  storeRef:
+    name: external-secret-cluster-store
+    kind: ClusterSecretStore
+  remoteKey: kubernetes/fiter-us-east-2-dev/access-cdc/oracle

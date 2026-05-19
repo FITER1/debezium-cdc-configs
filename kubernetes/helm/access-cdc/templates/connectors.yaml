@@ -1,0 +1,100 @@
+{{- $root := . -}}
+{{- $common := .Values.connectors.common -}}
+{{- range $connector := list .Values.connectors.coreBanking .Values.connectors.nipSystem .Values.connectors.webserve }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: {{ $connector.name }}
+  labels:
+    strimzi.io/cluster: {{ $root.Values.kafkaConnect.name }}
+    {{- include "access-cdc.labels" $root | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  class: io.debezium.connector.oracle.OracleConnector
+  tasksMax: {{ $common.tasksMax }}
+  autoRestart:
+    enabled: true
+    maxRestarts: 10
+  config:
+    database.hostname: {{ $root.Values.oracle.serviceName }}
+    database.port: "{{ $root.Values.oracle.port }}"
+    database.user: "${env:ORACLE_USERNAME}"
+    database.password: "${env:ORACLE_PASSWORD}"
+    database.dbname: {{ $root.Values.oracle.cdbName | quote }}
+    database.pdb.name: {{ $root.Values.oracle.pdbName | quote }}
+    database.connection.adapter: logminer
+    log.mining.strategy: {{ $common.logMiningStrategy }}
+    topic.prefix: {{ $connector.topicPrefix }}
+    schema.include.list: {{ $connector.schemaIncludeList }}
+    table.include.list: {{ join "," $connector.tableIncludeList | quote }}
+    schema.history.internal.kafka.bootstrap.servers: {{ $common.schemaHistoryBootstrap }}
+    schema.history.internal.kafka.topic: schema-changes.{{ $connector.topicPrefix }}
+    snapshot.mode: {{ $common.snapshotMode }}
+    decimal.handling.mode: {{ $common.decimalHandlingMode }}
+    tombstones.on.delete: "{{ $common.tombstonesOnDelete }}"
+    include.schema.changes: "{{ $common.includeSchemaChanges }}"
+    # LogMiner tuning
+    log.mining.batch.size.default: "{{ $common.logMiningBatchSizeDefault }}"
+    log.mining.batch.size.max: "{{ $common.logMiningBatchSizeMax }}"
+    log.mining.batch.size.min: "{{ $common.logMiningBatchSizeMin }}"
+    log.mining.sleep.time.default.ms: "{{ $common.logMiningSleepTimeDefaultMs }}"
+    log.mining.sleep.time.increment.ms: "{{ $common.logMiningSleepTimeIncrementMs }}"
+    log.mining.sleep.time.max.ms: "{{ $common.logMiningSleepTimeMaxMs }}"
+    {{- if $common.logMiningSleepTimeMinMs }}
+    log.mining.sleep.time.min.ms: "{{ $common.logMiningSleepTimeMinMs }}"
+    {{- end }}
+    max.batch.size: "{{ $common.maxBatchSize }}"
+    max.queue.size: "{{ $common.maxQueueSize }}"
+    poll.interval.ms: "{{ $common.pollIntervalMs }}"
+    {{- if $common.logMiningQueryFilterMode }}
+    log.mining.query.filter.mode: "{{ $common.logMiningQueryFilterMode }}"
+    {{- end }}
+    {{- if $common.heartbeatIntervalMs }}
+    heartbeat.interval.ms: "{{ $common.heartbeatIntervalMs }}"
+    {{- end }}
+    {{- with $connector.pov }}
+    transforms: filter
+    transforms.filter.type: io.debezium.transforms.Filter
+    transforms.filter.language: jsr223.groovy
+    transforms.filter.null.handling.mode: keep
+    transforms.filter.condition: |
+      {{- if .accountRange }}
+      if (value == null) { return true };
+      def src = null;
+      try { src = value.get('source') } catch(Exception e) { return true };
+      def tbl = src != null ? src.get('table') : '';
+      if (tbl == 'STZM_TRN_CODE' || tbl == 'STZM_CUST_ACCOUNT') { return true };
+      def r = null;
+      try { r = value.get('after') } catch(Exception e) { };
+      if (r == null) { try { r = value.get('before') } catch(Exception e) { } };
+      if (r == null) { return true };
+      def v = null;
+      try { v = r.get('CUST_AC_NO') } catch(Exception e) { };
+      if (v == null) { try { v = r.get('AC_NO') } catch(Exception e) { } };
+      if (v == null) { return true };
+      def acNo = v.toString();
+      if (acNo.length() < 4) return false;
+      def seq = 0;
+      try { seq = Integer.parseInt(acNo.substring(3)) } catch(Exception e) { return false };
+      return seq >= {{ .accountRange.min }} && seq <= {{ .accountRange.max }}
+      {{- else }}
+      import java.util.HashSet;
+      def accounts = new HashSet(Arrays.asList('{{ join "','" .accounts }}'));
+      if (value == null) { return true };
+      def src = value.get('source');
+      def tbl = src != null ? src.get('table') : '';
+      if (tbl == 'STZM_TRN_CODE') { return true };
+      def r = null;
+      try { r = value.get('after') } catch(Exception e) { };
+      if (r == null) { try { r = value.get('before') } catch(Exception e) { } };
+      if (r == null) { return true };
+      def v = null;
+      try { v = r.get('CUST_AC_NO') } catch(Exception e) { };
+      if (v == null) { try { v = r.get('AC_NO') } catch(Exception e) { } };
+      if (v == null) { return true };
+      return accounts.contains(v.toString())
+      {{- end }}
+    {{- end }}
+{{- end }}

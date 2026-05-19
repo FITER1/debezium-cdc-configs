@@ -1,0 +1,118 @@
+{{- if .Values.oracle.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.oracle.serviceName }}
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oracle
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  type: ClusterIP
+  ports:
+    - name: oracle
+      port: {{ .Values.oracle.port }}
+      targetPort: oracle
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: oracle
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.oracle.serviceName }}
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oracle
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  serviceName: {{ .Values.oracle.serviceName }}
+  replicas: {{ .Values.oracle.replicas }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: oracle
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "access-cdc.labels" . | nindent 8 }}
+        app.kubernetes.io/component: oracle
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.oracle.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodepool.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodepool.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: oracle
+          image: "{{ .Values.oracle.image.repository }}:{{ .Values.oracle.image.tag }}"
+          imagePullPolicy: {{ .Values.oracle.image.pullPolicy }}
+          ports:
+            - name: oracle
+              containerPort: {{ .Values.oracle.port }}
+              protocol: TCP
+          env:
+            - name: ORACLE_DATABASE
+              value: {{ .Values.oracle.pdbName | quote }}
+            - name: ORACLE_CHARACTERSET
+              value: {{ .Values.oracle.characterSet | quote }}
+            - name: ORACLE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: ORACLE_PASSWORD
+          securityContext:
+            {{- toYaml .Values.oracle.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /opt/oracle/oradata
+            - name: init-scripts
+              mountPath: /container-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -lc
+                - "echo 'SELECT 1 FROM dual;' | sqlplus -L -s / as sysdba | grep -qE '^[[:space:]]*1[[:space:]]*$'"
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 60
+            timeoutSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: oracle
+            initialDelaySeconds: 300
+            periodSeconds: 30
+            timeoutSeconds: 10
+          resources:
+            {{- toYaml .Values.oracle.resources | nindent 12 }}
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: oracle-init-scripts
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: {{ .Values.oracle.storage.accessModes | toJson }}
+        storageClassName: {{ .Values.oracle.storage.storageClassName }}
+        resources:
+          requests:
+            storage: {{ .Values.oracle.storage.size }}
+{{- end }}

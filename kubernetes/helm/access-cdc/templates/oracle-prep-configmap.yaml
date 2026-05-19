@@ -1,0 +1,174 @@
+{{- if .Values.oracle.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oracle-prep-scripts
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  prep.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    escape_password() {
+      local value
+      value="$(printf '%s' "$1" | sed -e 's/"/""/g' -e "s/'/''/g")"
+      printf '%s' "${value}"
+    }
+
+    run_sql() {
+      local sys_password
+      sys_password="$(escape_password "${ORACLE_PASSWORD}")"
+      {
+        printf 'WHENEVER SQLERROR EXIT SQL.SQLCODE\n'
+        printf 'SET DEFINE OFF\n'
+        printf 'CONNECT sys/"%s"@//{{ .Values.oracle.serviceName }}:{{ .Values.oracle.port }}/{{ .Values.oracle.cdbName }} as sysdba\n' "${sys_password}"
+        cat
+        printf '\nEXIT;\n'
+      } | sqlplus -S /nolog
+    }
+
+    wait_for_sql() {
+      for i in $(seq 1 {{ .Values.oracle.prep.sqlWaitAttempts }}); do
+        if run_sql >/dev/null 2>&1 <<'SQL'
+    SELECT 1 FROM dual;
+    SQL
+        then
+          return 0
+        fi
+        echo "waiting for sqlplus..."
+        sleep 10
+      done
+
+      echo "oracle did not answer SQL within the configured wait window" >&2
+      return 1
+    }
+
+    create_or_update_app_user() {
+      local app_password
+      app_password="$(escape_password "${APP_USER_PASSWORD}")"
+
+      run_sql <<SQL
+    ALTER SESSION SET CONTAINER = CDB\$ROOT;
+    DECLARE
+      v_count NUMBER;
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM dba_users WHERE username = '{{ .Values.oracle.appUser }}';
+      IF v_count = 0 THEN
+        EXECUTE IMMEDIATE 'CREATE USER {{ .Values.oracle.appUser }} IDENTIFIED BY "${app_password}" CONTAINER=ALL';
+      ELSE
+        EXECUTE IMMEDIATE 'ALTER USER {{ .Values.oracle.appUser }} IDENTIFIED BY "${app_password}" ACCOUNT UNLOCK';
+      END IF;
+    END;
+    /
+    SQL
+    }
+
+    create_or_update_schema_user() {
+      local schema="$1"
+      local password_var="${schema}_PASSWORD"
+      local schema_password
+
+      if [ -z "${!password_var:-}" ]; then
+        echo "missing required password env var ${password_var}" >&2
+        return 1
+      fi
+
+      schema_password="$(escape_password "${!password_var}")"
+      run_sql <<SQL
+    ALTER SESSION SET CONTAINER = {{ .Values.oracle.pdbName }};
+    DECLARE
+      v_count NUMBER;
+    BEGIN
+      SELECT COUNT(*) INTO v_count FROM dba_users WHERE username = '${schema}';
+      IF v_count = 0 THEN
+        EXECUTE IMMEDIATE 'CREATE USER ${schema} IDENTIFIED BY "${schema_password}" DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS';
+      ELSE
+        EXECUTE IMMEDIATE 'ALTER USER ${schema} IDENTIFIED BY "${schema_password}" ACCOUNT UNLOCK';
+        EXECUTE IMMEDIATE 'ALTER USER ${schema} QUOTA UNLIMITED ON USERS';
+      END IF;
+    END;
+    /
+    GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE TO ${schema};
+    SQL
+    }
+
+    wait_for_sql
+
+    run_sql <<'SQL'
+    ALTER SESSION SET CONTAINER = CDB$ROOT;
+    DECLARE
+      v_log_mode VARCHAR2(20);
+      v_supplemental_all VARCHAR2(8);
+      v_force_logging VARCHAR2(3);
+    BEGIN
+      SELECT log_mode INTO v_log_mode FROM v$database;
+      IF v_log_mode <> 'ARCHIVELOG' THEN
+        RAISE_APPLICATION_ERROR(-20000, 'Oracle database is not in ARCHIVELOG mode; recreate the PVC or run the init script before prep');
+      END IF;
+
+      SELECT force_logging INTO v_force_logging FROM v$database;
+      IF v_force_logging <> 'YES' THEN
+        EXECUTE IMMEDIATE 'ALTER DATABASE FORCE LOGGING';
+      END IF;
+
+      SELECT supplemental_log_data_all INTO v_supplemental_all FROM v$database;
+      IF v_supplemental_all <> 'YES' THEN
+        EXECUTE IMMEDIATE 'ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS';
+      END IF;
+    EXCEPTION
+      WHEN OTHERS THEN
+        IF SQLCODE != -32588 THEN
+          RAISE;
+        END IF;
+    END;
+    /
+    SQL
+
+    create_or_update_app_user
+    {{- range .Values.oracle.schemas }}
+    create_or_update_schema_user "{{ . }}"
+    {{- end }}
+
+    run_sql <<'SQL'
+    ALTER SESSION SET CONTAINER = CDB$ROOT;
+    GRANT CREATE SESSION TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SET CONTAINER TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$DATABASE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT FLASHBACK ANY TABLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ANY TABLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT_CATALOG_ROLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT EXECUTE_CATALOG_ROLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ANY TRANSACTION TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT LOGMINING TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT EXECUTE ON DBMS_LOGMNR TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT EXECUTE ON DBMS_LOGMNR_D TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOG TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOG_HISTORY TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOGMNR_LOGS TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOGMNR_CONTENTS TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOGMNR_PARAMETERS TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$LOGFILE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$ARCHIVED_LOG TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$ARCHIVE_DEST_STATUS TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT SELECT ON V_$TRANSACTION TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    -- Required for Debezium's LOG_MINING_FLUSH commit-acceleration table
+    GRANT CREATE TABLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT LOCK ANY TABLE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    GRANT UNLIMITED TABLESPACE TO {{ .Values.oracle.appUser }} CONTAINER=ALL;
+    SQL
+
+    {{- range .Values.oracle.schemas }}
+    run_sql <<'SQL'
+    ALTER SESSION SET CONTAINER = {{ $.Values.oracle.pdbName }};
+    BEGIN
+      FOR t IN (SELECT table_name FROM all_tables WHERE owner = '{{ . }}') LOOP
+        EXECUTE IMMEDIATE 'GRANT SELECT ON {{ . }}.' || t.table_name || ' TO {{ $.Values.oracle.appUser }}';
+      END LOOP;
+    END;
+    /
+    SQL
+    {{- end }}
+{{- end }}

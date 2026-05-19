@@ -1,0 +1,91 @@
+{{- if .Values.oracle.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oracle-prep
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oracle-prep
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: {{ .Values.oracle.prep.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "access-cdc.labels" . | nindent 8 }}
+        app.kubernetes.io/component: oracle-prep
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.oracle.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodepool.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodepool.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-oracle
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 {{ .Values.oracle.prep.tcpWaitAttempts }}); do
+                if nc -z {{ .Values.oracle.serviceName }} {{ .Values.oracle.port }}; then
+                  exit 0
+                fi
+                echo "waiting for oracle...";
+                sleep 5;
+              done
+              echo "oracle tcp port did not open within the configured wait window" >&2
+              exit 1
+          securityContext:
+            {{- toYaml .Values.oracle.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.oracle.prep.initResources | nindent 12 }}
+      containers:
+        - name: sqlplus
+          image: "{{ .Values.oracle.image.repository }}:{{ .Values.oracle.image.tag }}"
+          command:
+            - bash
+            - /scripts/prep.sh
+          env:
+            - name: ORACLE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: ORACLE_PASSWORD
+            - name: APP_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: APP_USER_PASSWORD
+            {{- range .Values.oracle.schemas }}
+            - name: {{ . }}_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: {{ . }}_PASSWORD
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.oracle.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.oracle.prep.resources | nindent 12 }}
+          volumeMounts:
+            - name: prep
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: prep
+          configMap:
+            name: oracle-prep-scripts
+            defaultMode: 0555
+{{- end }}
