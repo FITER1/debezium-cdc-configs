@@ -39,7 +39,7 @@ Run as SYSDBA on the Flexcube database. Full script: [`scripts/oracle/oracle-pre
 1. **Enable ARCHIVELOG** — `ALTER DATABASE ARCHIVELOG; ALTER DATABASE FORCE LOGGING;`
 2. **Supplemental logging** — `ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;`
 3. **Table-level logging** — For each captured table
-4. **Create user** — `CREATE USER C##DEBEZIUM IDENTIFIED BY <password> CONTAINER=ALL;`
+4. **Create user** — `CREATE USER C##CDC IDENTIFIED BY <password> CONTAINER=ALL;`
 5. **Grant privileges** — LogMiner, SELECT, FLASHBACK, CREATE TABLE (both CDB and PDB)
 
 ---
@@ -149,7 +149,7 @@ npm run report:final
 
 | Error | Fix |
 |-------|-----|
-| `ORA-00942` on `V$DATABASE` | `GRANT SELECT ON V_$DATABASE TO C##DEBEZIUM;` |
+| `ORA-00942` on `V$DATABASE` | `GRANT SELECT ON V_$DATABASE TO C##CDC;` |
 | `ORA-01031` on `CREATE TABLE LOG_MINING_FLUSH` | Grant `CREATE TABLE` + `UNLIMITED TABLESPACE` in PDB |
 | `ORA-01031` on `AS OF SCN` | Grant `FLASHBACK ANY TABLE` in PDB |
 | Connector running, no events | Check `database.dbname` matches CDB name |
@@ -164,13 +164,45 @@ curl -s http://localhost:8083/connectors/accessbank-core-banking-connector/statu
 
 ---
 
+## 11. Kubernetes Deployment (Production)
+
+The Helm chart at `kubernetes/helm/access-cdc/` deploys the full CDC stack on Kubernetes via ArgoCD or Helm CLI.
+
+```bash
+# Install with Helm
+helm install access-cdc ./kubernetes/helm/access-cdc -n access-cdc --create-namespace
+
+# Or dry-run to inspect
+helm template access-cdc ./kubernetes/helm/access-cdc -n access-cdc
+```
+
+Components deployed:
+- **Oracle XE StatefulSet** (dev/test only; disable for remote Oracle)
+- **ExternalSecret** pulling credentials from AWS Secrets Manager
+- **Oracle prep Job** creating CDC user and granting privileges
+- **Strimzi KafkaConnect** with custom Debezium image
+- **KafkaConnector** resources for each schema
+- **KafkaTopic** resources for auto-creation
+- **NetworkPolicy** restricting Oracle ingress
+
+See [`kubernetes/helm/access-cdc/README.md`](kubernetes/helm/access-cdc/README.md) for details.
+
+---
+
 ## Repo Structure
 
 ```
 ├── README.md
-├── docker-compose.yml              # Infrastructure dependencies
+├── docker-compose.yml              # Infrastructure dependencies (local dev)
+├── Dockerfile.connect              # Custom Kafka Connect image
+├── kubernetes/
+│   └── helm/access-cdc/            # Helm chart for K8s deployment
+│       ├── Chart.yaml
+│       ├── values.yaml
+│       ├── README.md
+│       └── templates/              # K8s resource templates
 ├── scripts/
-│   ├── connectors/                 # Connector creation scripts
+│   ├── connectors/                 # Connector creation scripts (docker)
 │   ├── oracle/                     # DBA preparation SQL
 │   └── simulation/                 # Dev/test table & seed data
 └── load-tests/

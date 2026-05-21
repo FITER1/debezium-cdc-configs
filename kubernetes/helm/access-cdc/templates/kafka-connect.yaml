@@ -1,0 +1,64 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: {{ .Values.kafkaConnect.name }}
+  labels:
+    {{- include "access-cdc.labels" . | nindent 4 }}
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  version: {{ .Values.kafkaConnect.version }}
+  replicas: {{ .Values.kafkaConnect.replicas }}
+  bootstrapServers: {{ .Values.kafkaConnect.bootstrapServers }}
+  image: {{ .Values.kafkaConnect.image }}
+  config:
+    config.providers: env
+    config.providers.env.class: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    group.id: {{ .Values.kafkaConnect.config.groupId }}
+    offset.storage.topic: {{ .Values.kafkaConnect.config.offsetStorageTopic }}
+    offset.storage.replication.factor: {{ .Values.kafkaConnect.config.storageReplicationFactor }}
+    config.storage.topic: {{ .Values.kafkaConnect.config.configStorageTopic }}
+    config.storage.replication.factor: {{ .Values.kafkaConnect.config.storageReplicationFactor }}
+    status.storage.topic: {{ .Values.kafkaConnect.config.statusStorageTopic }}
+    status.storage.replication.factor: {{ .Values.kafkaConnect.config.storageReplicationFactor }}
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: "true"
+    value.converter.schemas.enable: "true"
+    topic.creation.enable: "true"
+  template:
+    pod:
+      securityContext:
+        {{- toYaml .Values.kafkaConnect.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodepool.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodepool.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    connectContainer:
+      securityContext:
+        {{- toYaml .Values.kafkaConnect.containerSecurityContext | nindent 8 }}
+      env:
+        - name: ORACLE_USERNAME
+          value: {{ .Values.oracle.appUser | quote }}
+        - name: ORACLE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: oracle-credentials
+              key: password
+        - name: LD_LIBRARY_PATH
+          value: "/opt/oracle/instantclient"
+  resources:
+    {{- toYaml .Values.kafkaConnect.resources | nindent 4 }}
+  jvmOptions:
+    {{- toYaml .Values.kafkaConnect.jvmOptions | nindent 4 }}
+  readinessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 5
+  livenessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 5

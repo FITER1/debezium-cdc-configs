@@ -305,8 +305,8 @@ BEGIN
             );
         END IF;
 
-        -- Commit every 100 records
-        IF MOD(i, 100) = 0 THEN
+        -- Commit every 1000 records
+        IF MOD(i, 1000) = 0 THEN
             COMMIT;
             DBMS_OUTPUT.PUT_LINE('  Inserted ' || i || ' / ' || p_count || ' transactions (@ ' || TO_CHAR(SYSTIMESTAMP, 'HH24:MI:SS.FF3') || ')');
             -- Optional delay between batches to simulate realistic transaction flow

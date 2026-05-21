@@ -1,0 +1,6 @@
+apiVersion: v2
+name: access-cdc
+description: Oracle XE + Debezium connectors for Access Bank CDC (side stack, disposable)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
