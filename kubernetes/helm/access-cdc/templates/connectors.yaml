@@ -24,18 +24,13 @@ spec:
     database.password: "${env:ORACLE_PASSWORD}"
     database.dbname: {{ $root.Values.oracle.cdbName | quote }}
     database.pdb.name: {{ $root.Values.oracle.pdbName | quote }}
-    database.connection.adapter: logminer
+    database.connection.adapter: {{ $common.adapter }}
+    {{- if eq $common.adapter "xstream" }}
+    # XStream configuration
+    database.out.server.name: {{ $common.outboundServerName | quote }}
+    {{- else }}
+    # LogMiner configuration
     log.mining.strategy: {{ $common.logMiningStrategy }}
-    topic.prefix: {{ $connector.topicPrefix }}
-    schema.include.list: {{ $connector.schemaIncludeList }}
-    table.include.list: {{ join "," $connector.tableIncludeList | quote }}
-    schema.history.internal.kafka.bootstrap.servers: {{ $common.schemaHistoryBootstrap }}
-    schema.history.internal.kafka.topic: schema-changes.{{ $connector.topicPrefix }}
-    snapshot.mode: {{ $common.snapshotMode }}
-    decimal.handling.mode: {{ $common.decimalHandlingMode }}
-    tombstones.on.delete: "{{ $common.tombstonesOnDelete }}"
-    include.schema.changes: "{{ $common.includeSchemaChanges }}"
-    # LogMiner tuning
     log.mining.batch.size.default: "{{ $common.logMiningBatchSizeDefault }}"
     log.mining.batch.size.max: "{{ $common.logMiningBatchSizeMax }}"
     log.mining.batch.size.min: "{{ $common.logMiningBatchSizeMin }}"
@@ -45,15 +40,26 @@ spec:
     {{- if $common.logMiningSleepTimeMinMs }}
     log.mining.sleep.time.min.ms: "{{ $common.logMiningSleepTimeMinMs }}"
     {{- end }}
-    max.batch.size: "{{ $common.maxBatchSize }}"
-    max.queue.size: "{{ $common.maxQueueSize }}"
-    poll.interval.ms: "{{ $common.pollIntervalMs }}"
     {{- if $common.logMiningQueryFilterMode }}
     log.mining.query.filter.mode: "{{ $common.logMiningQueryFilterMode }}"
     {{- end }}
+    {{- end }}
+    topic.prefix: {{ $connector.topicPrefix }}
+    schema.include.list: {{ $connector.schemaIncludeList }}
+    table.include.list: {{ join "," $connector.tableIncludeList | quote }}
+    schema.history.internal.kafka.bootstrap.servers: {{ $common.schemaHistoryBootstrap }}
+    schema.history.internal.kafka.topic: schema-changes.{{ $connector.topicPrefix }}
+    snapshot.mode: {{ $common.snapshotMode }}
+    decimal.handling.mode: {{ $common.decimalHandlingMode }}
+    tombstones.on.delete: "{{ $common.tombstonesOnDelete }}"
+    include.schema.changes: "{{ $common.includeSchemaChanges }}"
+    max.batch.size: "{{ $common.maxBatchSize }}"
+    max.queue.size: "{{ $common.maxQueueSize }}"
+    poll.interval.ms: "{{ $common.pollIntervalMs }}"
     {{- if $common.heartbeatIntervalMs }}
     heartbeat.interval.ms: "{{ $common.heartbeatIntervalMs }}"
     {{- end }}
+    {{- if and (ne $common.adapter "xstream") $connector.pov }}
     {{- with $connector.pov }}
     transforms: filter
     transforms.filter.type: io.debezium.transforms.Filter
@@ -96,5 +102,6 @@ spec:
       if (v == null) { return true };
       return accounts.contains(v.toString())
       {{- end }}
+    {{- end }}
     {{- end }}
 {{- end }}

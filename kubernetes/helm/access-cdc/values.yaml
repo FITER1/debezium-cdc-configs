@@ -127,15 +127,23 @@ networkPolicy:
 # Three Debezium Oracle connectors
 connectors:
   common:
+    # Connection adapter: "xstream" (production) or "logminer" (dev/test)
+    adapter: xstream
+    # XStream outbound server name (created by DBA on Oracle side)
+    outboundServerName: DBZXOUT
     tasksMax: 1
     snapshotMode: initial
-    logMiningStrategy: online_catalog
     decimalHandlingMode: double
     tombstonesOnDelete: true
     includeSchemaChanges: false
     schemaHistoryBootstrap: "cdc-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+    maxBatchSize: 4096
+    maxQueueSize: 16384
+    pollIntervalMs: 100
+    heartbeatIntervalMs: 10000
 
-    #### LogMiner settings — tuned for 500+ TPS (2026-05-13)#####
+    # LogMiner settings — only used when adapter=logminer
+    logMiningStrategy: online_catalog
     logMiningBatchSizeDefault: 50000
     logMiningBatchSizeMax: 200000
     logMiningBatchSizeMin: 1000
@@ -143,11 +151,7 @@ connectors:
     logMiningSleepTimeIncrementMs: 50
     logMiningSleepTimeMaxMs: 1000
     logMiningSleepTimeMinMs: 0
-    maxBatchSize: 4096
-    maxQueueSize: 16384
-    pollIntervalMs: 100
     logMiningQueryFilterMode: in
-    heartbeatIntervalMs: 10000
 
   coreBanking:
     name: access-core-banking

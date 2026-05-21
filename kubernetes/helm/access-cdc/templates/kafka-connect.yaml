@@ -50,6 +50,8 @@ spec:
             secretKeyRef:
               name: oracle-credentials
               key: password
+        - name: LD_LIBRARY_PATH
+          value: "/opt/oracle/instantclient"
   resources:
     {{- toYaml .Values.kafkaConnect.resources | nindent 4 }}
   jvmOptions:

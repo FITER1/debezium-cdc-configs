@@ -2,8 +2,24 @@ FROM quay.io/strimzi/kafka:0.45.0-kafka-3.8.1
 
 ARG DEBEZIUM_VERSION=2.7.3.Final
 ARG GROOVY_VERSION=4.0.21
+ARG ORACLE_INSTANT_CLIENT_VERSION=21_15
 
 USER root
+
+# Oracle Instant Client — required for XStream OCI thick driver.
+# Also provides native libraries used by Debezium's XStream adapter.
+RUN microdnf install -y libaio unzip && microdnf clean all \
+ && mkdir -p /opt/oracle \
+ && curl -fsSL "https://download.oracle.com/otn_software/linux/instantclient/2115000/instantclient-basic-linux.x64-21.15.0.0.0dbru.zip" \
+    -o /tmp/instantclient.zip \
+ && unzip -q /tmp/instantclient.zip -d /opt/oracle \
+ && rm /tmp/instantclient.zip \
+ && ln -sf /opt/oracle/instantclient_${ORACLE_INSTANT_CLIENT_VERSION} /opt/oracle/instantclient \
+ && echo "/opt/oracle/instantclient" > /etc/ld.so.conf.d/oracle-instantclient.conf \
+ && ldconfig
+
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient
+ENV ORACLE_HOME=/opt/oracle/instantclient
 
 # Debezium Oracle connector + Groovy/scripting jars co-located so the
 # transforms.filter SMT (io.debezium.transforms.Filter) is visible to the
