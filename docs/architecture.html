@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CDC Pipeline Architecture</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: white; font-family: 'Segoe UI', Arial, sans-serif; padding: 40px 50px; }
+        h1 { text-align: center; color: #2c3e50; font-size: 20px; margin-bottom: 35px; }
+
+        .layout { display: flex; align-items: flex-start; gap: 0; }
+
+        /* Zones */
+        .zone-onprem {
+            background: #fef9f0; border: 2px dashed #e67e22; border-radius: 12px;
+            padding: 20px; width: 260px; min-height: 360px;
+        }
+        .zone-aws {
+            background: #eef6fc; border: 2px dashed #2980b9; border-radius: 12px;
+            padding: 20px; width: 320px; min-height: 460px;
+        }
+        .zone-label { font-size: 12px; font-weight: bold; color: #555; margin-bottom: 16px; }
+
+        /* Boxes */
+        .comp {
+            border-radius: 8px; padding: 14px 16px; text-align: center;
+            font-size: 12px; font-weight: 600; margin-bottom: 0;
+            border: 1px solid;
+        }
+        .comp-oracle { background: #f5b7a1; border-color: #e67e22; color: #333; }
+        .comp-connect { background: #fdeaa8; border-color: #f1c40f; color: #333; }
+        .comp-vpn { background: #e8e8e8; border-color: #bbb; color: #555; width: 160px; padding: 12px; }
+        .comp-msk { background: #a8d4f0; border-color: #2980b9; color: #1a3a5c; }
+        .comp-consumer { background: #5cd6b0; border-color: #27ae60; color: #1a4030; }
+        .comp-db { background: #b8a9d4; border-color: #8e44ad; color: #2c1a4a; }
+        .comp-sub { font-size: 10px; font-weight: normal; margin-top: 3px; color: #555; }
+
+        /* Vertical arrows */
+        .v-arrow {
+            display: flex; flex-direction: column; align-items: center;
+            margin: 8px 0; color: #666;
+        }
+        .v-arrow .line { width: 2px; height: 30px; background: #888; }
+        .v-arrow .head { font-size: 14px; line-height: 1; color: #888; }
+        .v-arrow .label { font-size: 9px; font-style: italic; color: #666; margin-top: 2px; }
+
+        /* Horizontal arrow (on-prem → VPN → AWS) */
+        .h-connector {
+            display: flex; align-items: center; margin: 0 8px; flex-shrink: 0;
+        }
+        .h-line { width: 40px; height: 2px; background: #888; }
+        .h-line-dash { width: 40px; height: 0; border-top: 2px dashed #b8860b; }
+        .h-head { font-size: 14px; color: #888; }
+
+        /* Note box */
+        .note {
+            background: #fef9cd; border: 1px solid #ddd; border-radius: 4px;
+            padding: 10px 12px; font-size: 10px; width: 200px; line-height: 1.5;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.1);
+            margin-left: 20px; align-self: flex-start; flex-shrink: 0;
+        }
+        .note b { font-size: 11px; display: block; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <h1>CDC Pipeline Architecture</h1>
+
+    <div class="layout">
+        <!-- ON-PREMISE -->
+        <div class="zone-onprem">
+            <div class="zone-label">On-premise</div>
+
+            <div class="comp comp-oracle">
+                Oracle DB (Flexcube)
+            </div>
+
+            <div class="v-arrow">
+                <div class="line"></div>
+                <div class="head">▼</div>
+                <div class="label">XStream OCI :6655</div>
+            </div>
+
+            <div class="comp comp-connect">
+                Strimzi-Kafka Connect / Debezium
+                <div class="comp-sub">
+                    Deployed: On-prem K8s (via ArgoCD GitOps)<br>
+                    Image: strimzi/kafka:0.45.0-kafka-3.8.1<br>
+                    + Oracle Instant Client 21.15 (OCI .so)<br>
+                    + Debezium Oracle 2.7.3.Final<br>
+                    CRD: KafkaConnect + KafkaConnector<br>
+                    3 Connectors · REST API :8083
+                </div>
+            </div>
+        </div>
+
+        <!-- HORIZONTAL: On-prem → VPN -->
+        <div class="h-connector" style="align-self: center; margin-top: 80px;">
+            <div class="h-line"></div>
+            <div class="h-head">▶</div>
+        </div>
+
+        <!-- VPN -->
+        <div style="align-self: center; margin-top: 80px;">
+            <div class="comp comp-vpn">
+                Site-to-Site VPN
+                <div class="comp-sub">:9094 TLS · :53 DNS</div>
+            </div>
+        </div>
+
+        <!-- HORIZONTAL: VPN → AWS -->
+        <div class="h-connector" style="align-self: center; margin-top: 80px;">
+            <div class="h-line-dash"></div>
+            <div class="h-head" style="color: #b8860b;">▶</div>
+        </div>
+
+        <!-- AWS VPC -->
+        <div class="zone-aws">
+            <div class="zone-label">AWS VPC</div>
+
+            <div class="comp comp-msk">
+                Amazon MSK
+                <div class="comp-sub">Kafka broker (mTLS / SASL auth)</div>
+            </div>
+
+            <div class="v-arrow">
+                <div class="line"></div>
+                <div class="head">▼</div>
+                <div class="label">consume :9094</div>
+            </div>
+
+            <div class="comp comp-consumer">
+                Consumer Service (Synapse)
+                <div class="comp-sub">EKS · 3 replicas</div>
+            </div>
+
+            <div class="v-arrow">
+                <div class="line"></div>
+                <div class="head">▼</div>
+                <div class="label">JDBC :5432</div>
+            </div>
+
+            <div class="comp comp-db">
+                Fineract / Synapse Database
+                <div class="comp-sub">PostgreSQL (RDS)</div>
+            </div>
+        </div>
+
+        <!-- Note - positioned outside the AWS box, not blocking it -->
+        <div class="note">
+            <b>⚙ Network permissions needed</b>
+            • On-prem → MSK :9094/TCP (VPN)<br>
+            • On-prem → Route53 :53/UDP (VPN)<br>
+            • EKS → MSK :9094/TCP (VPC)<br>
+            • On-prem → Oracle :6655/TCP (LAN)
+        </div>
+    </div>
+</body>
+</html>
