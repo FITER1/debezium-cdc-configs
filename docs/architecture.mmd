@@ -1,0 +1,76 @@
+graph TB
+    subgraph ON_PREM["🏢 ACCESS BANK ON-PREMISE (Nigeria Datacenter)"]
+        subgraph ORACLE_INFRA["Oracle Infrastructure"]
+            ORA["🗄️ Oracle Flexcube 19c RAC\n━━━━━━━━━━━━━━━━━━━━\nSCAN: AB02DWDB-SCAN3.accessbankplc.com\nPort: 6655\nPDB: ACCESSBANK\nTNS Service: FCUBSINTFUATDB"]
+            XS["⚡ XStream Outbound Server\n━━━━━━━━━━━━━━━━━━━━\nName: DBZXOUT\nUser: C##CDC\nSchemas: ABFCUBSLIVE, NIPSYSTEM, WEBSERVE\nSupplemental Logging: ALL COLUMNS"]
+        end
+
+        subgraph CONNECT_HOST["Kafka Connect VM (Docker Host)"]
+            subgraph CONTAINER["Docker Container"]
+                KC["🔌 Kafka Connect\n━━━━━━━━━━━━━━━━━━━━\nBase: Strimzi/Kafka 0.45.0-3.8.1\n+ Oracle Instant Client 21.15\n+ Debezium Oracle 2.7.3\n━━━━━━━━━━━━━━━━━━━━\nREST API: :8083\nProtocol to MSK: TLS :9094"]
+            end
+            CONN["📋 3 Connectors (XStream)\n━━━━━━━━━━━━━━━━━━━━\n1. access-core-banking\n   → ACZB_HISTORY, ACZB_DAILY_LOG\n   → STZM_CUST_ACCOUNT, STZM_TRN_CODE\n2. access-nip-system\n   → NIPX_DIRECT_CREDITS, NIPX_BANKS\n   → NIPX_INBOUND_CREDITS\n3. access-webserve\n   → PAYMENT_ROUTER_TXN_LOG\n   → CSTM_PRODUCT_INTERFACE_MAPPING"]
+            SECRETS_L["🔐 Secrets (on VM)\n━━━━━━━━━━━━━━━━━━━━\n• Oracle: C##CDC / password10$\n• MSK: TLS keystore + truststore\n  (or SASL/SCRAM credentials)"]
+        end
+
+        DNS_OP["🌐 On-Prem DNS\n━━━━━━━━━━━━━━━━━━━━\nResolves: Oracle SCAN (local)\nForwards: *.kafka.eu-west-1.amazonaws.com\n→ Route53 Resolver"]
+    end
+
+    subgraph VPN_LAYER["🔒 Site-to-Site VPN (IPSec)"]
+        VPN["Encrypted Tunnel\nOn-prem ↔ AWS VPC\nDual tunnel recommended"]
+    end
+
+    subgraph AWS["☁️ AWS VPC (eu-west-1)"]
+        subgraph MSK_CLUSTER["Amazon MSK (Managed Kafka Brokers)"]
+            MSK["📨 MSK Cluster (3 brokers)\n━━━━━━━━━━━━━━━━━━━━\nBroker 1: b-1.*:9094\nBroker 2: b-2.*:9094\nBroker 3: b-3.*:9094\n━━━━━━━━━━━━━━━━━━━━\nAuth: mTLS or SASL/SCRAM\nEncryption: TLS in-transit\nStorage: 100GB gp3/broker"]
+        end
+
+        subgraph TOPICS["Kafka Topics on MSK"]
+            T_CDC["📊 CDC Data Topics (9)\n━━━━━━━━━━━━━━━━━━━━\naccessbank-core.ABFCUBSLIVE.ACZB_HISTORY\naccessbank-core.ABFCUBSLIVE.ACZB_DAILY_LOG\naccessbank-core.ABFCUBSLIVE.STZM_CUST_ACCOUNT\naccessbank-core.ABFCUBSLIVE.STZM_TRN_CODE\naccessbank-nip.NIPSYSTEM.NIPX_DIRECT_CREDITS\naccessbank-nip.NIPSYSTEM.NIPX_BANKS\naccessbank-nip.NIPSYSTEM.NIPX_INBOUND_CREDITS\naccessbank-webserve.WEBSERVE.PAYMENT_ROUTER_TXN_LOG\naccessbank-webserve.WEBSERVE.CSTM_PRODUCT_INTERFACE_MAPPING"]
+            T_INT["⚙️ Internal Topics\n━━━━━━━━━━━━━━━━━━━━\naccess-connect-offsets\naccess-connect-configs\naccess-connect-status\nschema-changes.accessbank-*"]
+        end
+
+        subgraph NETWORK["Network & Security"]
+            SG["🛡️ Security Group\n━━━━━━━━━━━━━━━━━━━━\nInbound 9094 from:\n• On-prem VPN CIDR\n• EKS Pod CIDR"]
+            R53["🌐 Route53 Resolver\n━━━━━━━━━━━━━━━━━━━━\nInbound Endpoint\nResolves MSK FQDNs\nfor on-prem queries"]
+        end
+
+        subgraph EKS["EKS Cluster"]
+            subgraph SYN_NS["namespace: synapse"]
+                SYN["🖥️ Synapse (3 replicas)\n━━━━━━━━━━━━━━━━━━━━\nCDC Kafka Consumer\nGroup: synapse-cdc-consumer\nTopics: 9 CDC topics\n→ PostgreSQL inbox pattern"]
+                SYNC["🖥️ Synapse-consumer (1 replica)\n━━━━━━━━━━━━━━━━━━━━\nSecondary consumer"]
+            end
+            PG["🗄️ PostgreSQL\n━━━━━━━━━━━━━━━━━━━━\ndb1.dev.neobank.euw1.aws\nSynapse database\n(inbox + processed data)"]
+            FINERACT["🏦 Fineract\n━━━━━━━━━━━━━━━━━━━━\nCore Banking Engine\n(reads processed CDC data)"]
+        end
+    end
+
+    %% Data Flow
+    ORA -->|"XStream OCI\nport 6655\n(LOCAL)"| XS
+    XS -->|"Stream change events"| KC
+    CONN -.->|"REST API :8083"| KC
+    SECRETS_L -.->|"mounted"| KC
+    KC -->|"Kafka TLS\nport 9094\n(OVER VPN)"| VPN
+    VPN -->|"port 9094"| MSK
+    MSK --> T_CDC
+    MSK --> T_INT
+    T_CDC -->|"Kafka TLS\nport 9094\n(VPC internal)"| SYN
+    T_CDC -->|"Kafka TLS"| SYNC
+    SYN -->|"JDBC :5432"| PG
+    PG -->|"data"| FINERACT
+    DNS_OP -->|"DNS fwd :53"| R53
+
+    %% Styling
+    classDef oracle fill:#f9d5d3,stroke:#e74c3c,stroke-width:2px
+    classDef connect fill:#fdebd0,stroke:#f39c12,stroke-width:2px
+    classDef msk fill:#d4e6f1,stroke:#2980b9,stroke-width:2px
+    classDef eks fill:#d5f5e3,stroke:#27ae60,stroke-width:2px
+    classDef vpn fill:#f4f4f4,stroke:#7f8c8d,stroke-width:2px,stroke-dasharray: 5 5
+    classDef network fill:#e8daef,stroke:#8e44ad,stroke-width:2px
+
+    class ORA,XS oracle
+    class KC,CONN,SECRETS_L connect
+    class MSK,T_CDC,T_INT msk
+    class SYN,SYNC,PG,FINERACT eks
+    class VPN vpn
+    class SG,R53,DNS_OP network
