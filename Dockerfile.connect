@@ -1,7 +1,6 @@
 FROM quay.io/strimzi/kafka:0.45.0-kafka-3.8.1
 
 ARG DEBEZIUM_VERSION=2.7.3.Final
-ARG GROOVY_VERSION=4.0.21
 ARG ORACLE_INSTANT_CLIENT_VERSION=21_15
 
 USER root
@@ -21,16 +20,9 @@ RUN microdnf install -y libaio unzip && microdnf clean all \
 ENV LD_LIBRARY_PATH=/opt/oracle/instantclient
 ENV ORACLE_HOME=/opt/oracle/instantclient
 
-# Debezium Oracle connector + Groovy/scripting jars co-located so the
-# transforms.filter SMT (io.debezium.transforms.Filter) is visible to the
-# connector's plugin classloader (Connect isolates classes per plugin dir).
+# Debezium Oracle connector (XStream adapter — filtering handled by Oracle Subset Rules).
 RUN mkdir -p /opt/kafka/plugins/debezium-oracle \
  && curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-oracle/${DEBEZIUM_VERSION}/debezium-connector-oracle-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-    | tar -xzf - --strip-components=1 -C /opt/kafka/plugins/debezium-oracle \
- && cd /opt/kafka/plugins/debezium-oracle \
- && curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-scripting/${DEBEZIUM_VERSION}/debezium-scripting-${DEBEZIUM_VERSION}.jar" -o debezium-scripting.jar \
- && curl -fsSL "https://repo1.maven.org/maven2/org/apache/groovy/groovy/${GROOVY_VERSION}/groovy-${GROOVY_VERSION}.jar" -o groovy.jar \
- && curl -fsSL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-jsr223/${GROOVY_VERSION}/groovy-jsr223-${GROOVY_VERSION}.jar" -o groovy-jsr223.jar \
- && curl -fsSL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-json/${GROOVY_VERSION}/groovy-json-${GROOVY_VERSION}.jar" -o groovy-json.jar
+    | tar -xzf - --strip-components=1 -C /opt/kafka/plugins/debezium-oracle
 
 USER 1001
