@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CDC Deployment Topology</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #f8fafc;
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .diagram {
+    width: 880px;
+    max-height: 100vh;
+    padding: 14px 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+  .title {
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 10px;
+    letter-spacing: -0.02em;
+  }
+  .zone {
+    border: 2px solid;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .zone-onprem {
+    border-color: #f97316;
+    background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  }
+  .zone-aws {
+    border-color: #2563eb;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  }
+  .zone-label {
+    position: absolute;
+    top: -10px;
+    left: 16px;
+    background: white;
+    padding: 1px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid;
+  }
+  .zone-onprem .zone-label {
+    color: #ea580c;
+    border-color: #fb923c;
+  }
+  .zone-aws .zone-label {
+    color: #1d4ed8;
+    border-color: #60a5fa;
+  }
+  .component {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 4px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .component:last-child { margin-bottom: 0; }
+  .component-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .icon-oracle { background: #fef3c7; }
+  .icon-xstream { background: #fce7f3; }
+  .icon-kafka-connect { background: #d1fae5; }
+  .icon-msk { background: #dbeafe; }
+  .icon-synapse { background: #e0e7ff; }
+  .icon-postgres { background: #cffafe; }
+  .icon-api { background: #f3e8ff; }
+  .component-info { flex: 1; }
+  .component-name {
+    font-weight: 600;
+    font-size: 11px;
+    color: #1e293b;
+  }
+  .component-desc {
+    font-size: 9.5px;
+    color: #64748b;
+    line-height: 1.2;
+  }
+  .tables-list {
+    font-size: 9px;
+    color: #78716c;
+    background: #fafaf9;
+    border: 1px solid #e7e5e4;
+    border-radius: 4px;
+    padding: 3px 6px;
+    margin-top: 3px;
+    font-family: 'Consolas', 'SF Mono', monospace;
+    line-height: 1.4;
+  }
+  .arrow-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2px 0;
+  }
+  .arrow-line {
+    width: 2px;
+    height: 10px;
+    background: #94a3b8;
+  }
+  .arrow-head {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #94a3b8;
+  }
+  .arrow-label {
+    font-size: 9px;
+    color: #64748b;
+    font-style: italic;
+    margin: 1px 0;
+    background: rgba(255,255,255,0.8);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .wan-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 0;
+  }
+  .wan-arrow .arrow-line {
+    height: 14px;
+    background: repeating-linear-gradient(
+      to bottom,
+      #f97316 0px, #f97316 3px,
+      transparent 3px, transparent 6px
+    );
+    width: 2px;
+  }
+  .wan-arrow .arrow-head {
+    border-top-color: #2563eb;
+  }
+  .wan-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #475569;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+  }
+  .sub-components {
+    margin-left: 36px;
+    padding-left: 10px;
+    border-left: 2px solid #e2e8f0;
+    margin-bottom: 4px;
+  }
+  .sub-item {
+    font-size: 9.5px;
+    color: #475569;
+    padding: 1px 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sub-item::before {
+    content: '•';
+    color: #94a3b8;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="diagram" id="diagram">
+  <div class="title">Access Bank — CDC Deployment Topology</div>
+
+  <!-- On-Prem Zone -->
+  <div class="zone zone-onprem">
+    <span class="zone-label">On-Premises</span>
+
+    <div class="component">
+      <div class="component-icon icon-oracle"></div>
+      <div class="component-info">
+        <div class="component-name">Oracle Flexcube</div>
+        <div class="component-desc">Core banking system (existing, unchanged)</div>
+        <div class="tables-list">
+          ACZB_HISTORY · ACZB_DAILY_LOG · STZM_CUST_ACCOUNT · STZM_CUSTOMER<br>
+          STZM_TRN_CODE · NIPX_DIRECT_CREDITS · NIPX_BANKS<br>
+          NIPX_INBOUND_CREDITS · PAYMENT_ROUTER_TXN_LOG · CSTM_PRODUCT_INTERFACE_MAPPING
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-container">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">Redo log capture (passive, no DB overhead)</div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="component">
+      <div class="component-icon icon-xstream"></div>
+      <div class="component-info">
+        <div class="component-name">XStream Outbound Server</div>
+        <div class="component-desc">On existing C##CDC user — Oracle-native change streaming</div>
+      </div>
+    </div>
+
+    <div class="arrow-container">
+      <div class="arrow-line"></div>
+      <div class="arrow-label">Local network</div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="component">
+      <div class="component-icon icon-kafka-connect"></div>
+      <div class="component-info">
+        <div class="component-name">Kafka Connect Worker</div>
+        <div class="component-desc">Single VM, on-premises — Debezium Oracle connector with XStream adapter</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WAN Arrow -->
+  <div class="wan-arrow">
+    <div class="arrow-line"></div>
+    <div class="wan-label">▼ Publish to AWS MSK over WAN (mTLS, port 9094)</div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- AWS Zone -->
+  <div class="zone zone-aws">
+    <span class="zone-label">AWS eu-west-1 (Existing Infrastructure)</span>
+
+    <div class="component">
+      <div class="component-icon icon-msk"></div>
+      <div class="component-info">
+        <div class="component-name">Amazon MSK (Kafka)</div>
+        <div class="component-desc">Managed Kafka cluster — receives CDC events from on-premises connector</div>
+      </div>
+    </div>
+
+    <div class="arrow-container">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="component">
+      <div class="component-icon icon-synapse"></div>
+      <div class="component-info">
+        <div class="component-name">Synapse Consumer (EKS)</div>
+        <div class="component-desc">Event-driven banking service — existing</div>
+      </div>
+    </div>
+    <div class="sub-components">
+      <div class="sub-item">CDC event parsing</div>
+      <div class="sub-item">Transaction enrichment (narration, beneficiary, bank type, NIP lookups)</div>
+      <div class="sub-item">Cross-table correlation across all 10 source tables</div>
+      <div class="sub-item">PostgreSQL write</div>
+    </div>
+
+    <div class="arrow-container">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="component">
+      <div class="component-icon icon-postgres"></div>
+      <div class="component-info">
+        <div class="component-name">PostgreSQL</div>
+        <div class="component-desc">Enriched transaction store</div>
+      </div>
+    </div>
+
+    <div class="arrow-container">
+      <div class="arrow-line"></div>
+      <div class="arrow-head"></div>
+    </div>
+
+    <div class="component">
+      <div class="component-icon icon-api"></div>
+      <div class="component-info">
+        <div class="component-name">Mobile App Statement API</div>
+        <div class="component-desc">Customer-facing — serves enriched transaction statements</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
